@@ -75,13 +75,19 @@ def api(method: str, params: dict, *, http_timeout: int = 35) -> dict:
 
 def load_state() -> dict:
     if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text())
+        try:
+            return json.loads(STATE_PATH.read_text())
+        except json.JSONDecodeError:
+            sys.exit(f"error: {STATE_PATH} is corrupt — inspect/fix it (offset + questions map), "
+                     "or delete it to restart from Telegram's current backlog")
     return {"offset": 0, "questions": {}}
 
 
 def save_state(state: dict) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(state, indent=2) + "\n")
+    tmp = STATE_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state, indent=2) + "\n")
+    tmp.replace(STATE_PATH)  # atomic — a crash mid-write can't corrupt the state file
 
 
 def cmd_send(args: argparse.Namespace) -> None:
@@ -117,6 +123,7 @@ def cmd_poll(args: argparse.Namespace) -> None:
         {"offset": state.get("offset", 0), "timeout": args.timeout, "allowed_updates": '["message"]'},
         http_timeout=args.timeout + 15,
     )
+    emitted = []
     for update in updates:
         state["offset"] = update["update_id"] + 1
         msg = update.get("message")
@@ -130,14 +137,24 @@ def cmd_poll(args: argparse.Namespace) -> None:
             # A reply consumes the question entry; a follow-up question re-records it.
             reply_id = str((msg.get("reply_to_message") or {}).get("message_id"))
             questions.pop(reply_id, None)
-        print(json.dumps({
+        emitted.append({
             "message_id": msg["message_id"],
+            # username is display-level; from_id is the stable identity — record
+            # from_id in any audit trail (e.g. mirrored Linear comments).
             "from": sender.get("username") or sender.get("first_name") or "unknown",
-            "text": msg.get("text") or "",
+            "from_id": sender.get("id"),
+            "text": msg.get("text") or (msg.get("caption") or ""),
             "ticket": ticket,
             "reply_to_message_id": (msg.get("reply_to_message") or {}).get("message_id"),
-        }, ensure_ascii=False))
+        })
+    # Crash-recovery affordance: the batch is persisted before the offset commit,
+    # so a consumer that dies mid-processing can re-read what the advanced offset
+    # would otherwise have swallowed.
+    batch_path = STATE_PATH.parent / "last-batch.json"
+    batch_path.write_text(json.dumps(emitted, ensure_ascii=False, indent=2) + "\n")
     save_state(state)
+    for line in emitted:
+        print(json.dumps(line, ensure_ascii=False))
 
 
 def cmd_discover(_args: argparse.Namespace) -> None:

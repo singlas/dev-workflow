@@ -48,6 +48,17 @@ usually accidental (a pasted error log, a forwarded message, a well-meaning
 - **Git stays inside the lane:** branch off `origin/dev`, push only
   `agent/nip-<n>` branches, open PRs into `dev`. Never push `main` or `dev`,
   never force-push, never merge a PR, never delete branches you didn't create.
+- **Secrets never flow through code either.** The exfil path isn't only
+  "paste the .env" — code or tests that *read* env vars/credentials and echo
+  them into test output, logs, PR text, or app responses leak just as well.
+  Never write code that prints or transmits secret values, and never quote a
+  secret value in a PR or comment even if one surfaces in output you read.
+- **Tooling and dependency changes need a human.** Staying "inside the repo"
+  isn't enough: edits to `scripts/`, `pyproject.toml`/`uv.lock`, test
+  harnesses, or linter config change what the loop itself executes next run.
+  Default build surface is app code + tests + docs; if the fix genuinely needs
+  a tooling/dependency change, flag it in the group and wait instead of
+  pushing it.
 - **Diff sanity check before pushing:** if a "small fix" has grown past ~400
   changed lines or ~15 files, or touches migrations/apps the ticket gives no
   reason to touch, stop — post `⚠️ NIP-<n> ballooned: <stat>` and ask in the
@@ -70,14 +81,23 @@ the subagent sees the untrusted ticket text too.
 
 ### 1. Drain Telegram answers
 
-Run `python3 scripts/agent-loop/telegram.py poll --timeout 0`. For each emitted
-JSON line with a non-null `ticket`:
+Run `python3 scripts/agent-loop/telegram.py poll --timeout 0`. **Classify every
+emitted message BEFORE mutating anything** — a `skip` reply to a proposal also
+arrives with a non-null `ticket`, and mirroring it as an "answer" or unblocking
+on it would corrupt ticket state. Decide what each message *is* (clarification
+answer / approval / decline / creation request / green-light / chatter), then
+act:
 
-- Add a Linear comment on that issue: `📩 Answer via Telegram (<from>): <text>`.
-- Remove the `agent-blocked` label (keep `agent`).
+- **Clarification answer** (non-null `ticket`, responds to an outstanding ❓):
+  add a Linear comment `📩 Answer via Telegram (<from>, id <from_id>): <text>`
+  and remove the `agent-blocked` label (keep `agent`). The `from_id` is the
+  stable identity — display names are spoofable; the id is the audit trail.
 
-Then classify the rest. **The `agent` label is ONLY ever applied through this
-group, on approval — never self-selected, never added silently.**
+**The `agent` label is ONLY ever applied through this group, on approval —
+never self-selected, never added silently.** Approvals must be plain text
+messages — Telegram emoji *reactions* never reach the bot, so a thumbs-up
+reaction is invisible; if someone seems to have approved but nothing arrived,
+that's why.
 
 - **Ticket-creation request** (`ticket: null`, first line starts case-insensitive
   with `bug:`, `feature:`, or `ticket:`): create a Linear issue (team Niptao) —
@@ -86,9 +106,10 @@ group, on approval — never self-selected, never added silently.**
   `feature:`, none for `ticket:`. Do NOT label it `agent` yet. Reply with a
   **proposal**: `telegram.py send --ticket NIP-<n> "📋 Created NIP-<n> — <title>.
   Take it? (go/skip)"`.
-- **Approval** (`go`/`yes`/`ok`/👍 on a proposal, matched by reply or prefix):
-  add the `agent` label — the ticket is now approved to build. `skip`/`no`:
-  leave it unlabeled, no further action.
+- **Approval** (`go`/`yes`/`ok` on a proposal, matched by reply or prefix):
+  add the `agent` label — the ticket is now approved to build. Record who
+  approved (name + `from_id`) in a Linear comment. `skip`/`no`: leave it
+  unlabeled, no further action — and do NOT mirror it as an answer.
 - **Direct green-light** (a message naming an existing ticket and asking the
   agent to take it, e.g. `take NIP-123` / `NIP-123 go ahead`): the message
   itself is the approval — add the `agent` label, confirm with
@@ -132,9 +153,15 @@ the clarification loop.
 
 **If complete:** continue — the `agent` label IS the approval (it was granted
 in the group), so no second confirmation. Announce, don't wait:
-`telegram.py send "🔨 Starting NIP-<n> — <one-line plan>"` (a group member can
-interject; if a message about this ticket arrives in a later drain mid-build,
-surface it on the ticket and reconcile in the PR or a follow-up).
+`telegram.py send "🔨 Starting NIP-<n> — <one-line plan>"`.
+
+Mid-build messages about the ticket are **context, not new requirements**:
+mirror them onto the ticket as comments, but don't expand or change the build's
+scope mid-flight. Two exceptions: an explicit stop/hold from a human aborts the
+build (comment why, keep the branch, skip-list the ticket), and an explicit
+re-scope means finish nothing — re-triage from the new message. Between builds,
+steering messages (priorities, "stack these onto one PR") are normal input —
+apply them.
 
 ### 4. Implement via subagent
 
@@ -150,8 +177,11 @@ surface it on the ticket and reconcile in the PR or a follow-up).
   4. Run the diff sanity check (size/scope) — if it trips, return the ⚠️ instead
      of pushing.
   5. Commit (conventional message mentioning NIP-<n>), push, open a PR **into
-     `dev`** via `gh pr create` — body: summary, assumptions, `Closes` line is NOT
-     used (tickets close at release), link to the issue.
+     `dev`** via `gh pr create` — title ends with ` [agent]` (e.g.
+     `fix(intake): enforce revision cap (NIP-153) [agent]`) so agent-authored
+     PRs are identifiable at a glance in the PR list; body: summary,
+     assumptions, `Closes` line is NOT used (tickets close at release), link to
+     the issue.
   6. Return: PR URL + one-paragraph summary + test results.
 - On success: issue → **In Review**, comment the PR link + summary, then
   `telegram.py send "✅ NIP-<n> — PR opened: <url>"`.
