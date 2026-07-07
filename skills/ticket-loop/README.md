@@ -4,8 +4,11 @@ An autonomous ticket loop built from plain Claude Code primitives — **no agent
 framework, no orchestrator service, nothing to host.** A Claude Code session
 works your Linear board: it takes approved tickets, asks clarifying questions in
 a Telegram group, implements each ticket in an isolated git worktree, and opens
-one reviewable PR per ticket. Anyone on the team — including non-engineers —
-reports bugs and features by typing (or dropping a screenshot) in the group.
+one reviewable PR per ticket — then **babysits that PR like an employee would**:
+addresses your review comments and failing CI, heals merge conflicts, closes the
+ticket when the PR merges, and reports in with a once-a-day digest. Anyone on
+the team — including non-engineers — reports bugs and features by typing (or
+dropping a screenshot) in the group.
 
 The entire system is this folder:
 
@@ -64,9 +67,12 @@ The entire system is this folder:
 | `stop` / `hold` (during a build) | The build aborts — branch kept, ticket skip-listed, reason commented |
 
 The agent posts back: ❓ clarifying questions, 🔨 when it starts a build,
-✅ with the PR link, ⚠️ on failures, 🔀 when it heals a conflicted PR, and
-🙋 proposals when the queue runs empty (it scouts your backlog for
-agent-suitable tickets rather than going idle — still approval-gated).
+✅ with the PR link (and ✅ again when the PR merges and the ticket closes),
+🔁 when it has addressed review feedback and updated a PR, ⚠️ on failures,
+🔀 when it heals a conflicted PR, 🙋 proposals when the queue runs empty (it
+scouts your backlog for agent-suitable tickets rather than going idle — still
+approval-gated), and one morning digest: merged / awaiting review / blocked on
+answers / queued (`--report` triggers it on demand, e.g. from cron).
 
 ## Safety model (the part that matters)
 
@@ -83,9 +89,9 @@ agent-suitable tickets rather than going idle — still approval-gated).
 - **One ticket at a time**, in a fresh isolated worktree per ticket, with a
   diff-size sanity check before anything is pushed.
 - **State lives on the tickets** (labels + comments), not in the session — kill
-  the loop and restart cold, nothing is lost. The only local state is the
-  Telegram poll offset in `.agent-loop/state.json` (plus a `last-batch.json`
-  crash-recovery copy of the most recent poll).
+  the loop and restart cold, nothing is lost. The only local state is
+  `.agent-loop/state.json` — the Telegram poll offset and the last-digest date
+  (plus a `last-batch.json` crash-recovery copy of the most recent poll).
 
 ## Things that will bite you
 

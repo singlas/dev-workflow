@@ -34,6 +34,7 @@ ai-dev-prompts/
 ├── web-optimization/        # PageSpeed + SEO/GEO/AEO prompts
 ├── workflows/               # Process & handover prompts
 ├── skills/                  # Claude Code skills — full working agents, not just prompts
+├── dev-process/             # Full AI-team dev process: branches, worktrees, skills, agent loop
 └── site/                    # HTML guide page + assets
 ```
 
@@ -43,10 +44,11 @@ Complete, drop-in Claude Code skills (a `SKILL.md` plus any helper script it
 needs). First entry: [`skills/ticket-loop/`](skills/ticket-loop/) — an
 autonomous coding agent that works your Linear board and is managed entirely
 from a Telegram group (bug reports with screenshots, approvals, clarifying
-questions), opening one reviewable PR per ticket and keeping its open PRs
-mergeable. No framework — one skill file + one stdlib-Python Telegram bridge;
-copy the folder into `.claude/skills/` and follow its README. More skills
-coming.
+questions), opening one reviewable PR per ticket — then babysitting it:
+addressing review comments and red CI, healing merge conflicts, closing the
+ticket when the PR merges, and reporting in with a daily digest. No framework —
+one skill file + one stdlib-Python Telegram bridge; copy the folder into
+`.claude/skills/` and follow its README. More skills coming.
 
 ### 1. Context File Generators (`context-files/`)
 
@@ -96,6 +98,22 @@ Process prompts for team operations and project management.
 |--------|-------------|
 | [project-handover.md](workflows/project-handover.md) | Structured handover checklist — credentials, access transfer, infrastructure, DNS, verification steps |
 
+### 5. Dev Process (`dev-process/`)
+
+A complete, battle-tested development process for a small team (or solo founder)
+working with AI coding agents — the [full playbook](dev-process/README.md) plus
+ready-to-copy scripts and skill templates:
+
+| Piece | What It Does |
+|-------|-------------|
+| [README.md](dev-process/README.md) | The playbook: two-branch model (`dev` trunk / `main` = prod mirror, deploys only via a deliberate `dev→main` PR), GitHub setup (branch ruleset + auto-delete head branches, with ready `gh api` commands), worktree slots for parallel agent sessions, the daily loop |
+| [scripts/worktree-reset.sh](dev-process/scripts/worktree-reset.sh) | Fresh auto-numbered branch off latest `dev` per worktree slot; symlinks shared per-machine state; garbage-collects dead worktrees + merged branches (`--gc`) |
+| [scripts/ship-preflight.sh](dev-process/scripts/ship-preflight.sh) | The deterministic git dance behind "wrap up and open a PR" — assess + sync-push in two reviewable calls |
+| [skills/standup.md](dev-process/skills/standup.md) | Session opener — board orientation, hygiene line, 2-4 recommended starting points |
+| [skills/cleanup.md](dev-process/skills/cleanup.md) | Session closer — commit, push, PR into `dev`, close tickets, handoff notes |
+| [skills/release.md](dev-process/skills/release.md) | The `dev→main` promotion that deploys — version bump, tag, release PR; merging stays the human's click |
+| [`skills/ticket-loop/`](skills/ticket-loop/) | The autonomous "AI employee" — the drop-in ticket-loop skill (§0) is the agent half of this process: labeled ticket queue, batched questions in team chat, isolated-worktree builds, PR babysitting, daily digest, prompt-injection guardrails |
+
 ### Coming Soon
 
 - **Copilot instructions generator** — `.github/copilot-instructions.md`
@@ -142,6 +160,11 @@ Optimize web performance
 
 Hand over a project to a new team
 └── workflows/project-handover.md
+
+Set up an AI-assisted dev process for a team
+├── Branch model + worktrees + GitHub setup → dev-process/README.md
+├── Session skills (standup/cleanup/release) → dev-process/skills/
+└── Autonomous ticket-working agent          → skills/ticket-loop/
 ```
 
 ## Design Principles

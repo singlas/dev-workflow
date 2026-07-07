@@ -23,6 +23,12 @@ ai-dev-prompts/
 │   └── seo-geo-aeo-optimization.md
 ├── workflows/               # Process & handover prompts
 │   └── project-handover.md
+├── skills/                  # Complete drop-in Claude Code skills (not just prompts)
+│   └── ticket-loop/         # autonomous coding agent managed from a Telegram group
+├── dev-process/             # AI-team dev process: playbook + scripts + skill templates
+│   ├── README.md            # branch model, worktrees, GitHub setup, daily loop, agent loop
+│   ├── scripts/             # worktree-reset.sh, ship-preflight.sh (ready to copy)
+│   └── skills/              # standup, cleanup, release templates (agent loop → ../skills/)
 ├── site/                    # HTML guide page + static assets
 │   ├── index.html
 │   └── assets/
