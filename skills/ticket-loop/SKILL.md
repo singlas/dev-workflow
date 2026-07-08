@@ -320,26 +320,26 @@ actionable *now*. Run the step-1 poll+classify again first — if it produced a 
 actionable ticket, go to step 3 instead of sleeping.
 
 - Actionable tickets remain → next iteration immediately.
-- Only blocked tickets remain → if running under /loop, `ScheduleWakeup`
-  20–30 min (answers are drained on wake at step 1); otherwise report the blocked
-  set and end the pass.
-- No `agent` tickets at all → **scout the board, but at most once per day.** Each
-  headless/cron pass is a fresh session, so the in-memory "already proposed" memory
-  is gone every pass — gate scouting on a `last_scout` date in
-  `.agent-loop/state.json` (exactly like `last_digest`), or the loop would
-  re-propose the same tickets every pass. Already scouted today → skip to idle.
-  Otherwise: list your team's open issues (Backlog + Todo), excluding anything
+- **Nothing buildable this pass → scout the board, at most once per day.**
+  "Nothing buildable" is the common idle case and covers BOTH "the remaining
+  `agent` tickets are all blocked/excluded (`agent-blocked` / a "hands off" label)"
+  AND "there are no `agent` tickets at all" — do NOT gate scouting on the `agent`
+  set being *empty*, or a permanently blocked/gated ticket (there's usually one)
+  suppresses scouting forever and the loop never looks for fresh work. Gate instead
+  on a `last_scout` date in `.agent-loop/state.json` (like `last_digest`), since
+  each headless/cron pass is a fresh session: already scouted today → skip to idle.
+  Otherwise list your team's open issues (Backlog + Todo), excluding anything
   labeled `manual`, `agent-blocked`, or already `agent` (plus any "hands off"
   labels your board uses). Pick up to 3 genuinely agent-suitable — well-scoped,
   in-repo code with testable acceptance criteria; skip ops decision passes,
   prod-mutating work, and design-taste calls — and ask: `🙋 Queue empty — I could
   take: ABC-<a> <title> · ABC-<b> <title>. Reply 'take ABC-<n>' to approve.`
-  Update `last_scout` after asking. The label is still applied only on a human's
+  Update `last_scout` after asking. The label is applied only on a human's
   approval reply, never by scouting itself.
-- Idle (nothing to build, nothing new to scout) → **end quietly.** Don't ping
-  "queue empty" every pass — that's noise, and the daily digest already reports
-  the queue. Under /loop, `ScheduleWakeup` 20–30 min; otherwise end the pass with
-  a summary of what this run did.
+- Then idle → **end quietly.** Don't ping "queue empty" every pass — that's noise,
+  and the daily digest already reports the queue. Under /loop, `ScheduleWakeup`
+  20–30 min (a blocked ticket's answer is drained on the next wake at step 1);
+  otherwise end the pass with a summary of what this run did.
 
 ## Daily digest — the agent reports in
 
