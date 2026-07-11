@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Per-machine state that must never be committed (secrets, scratch).
+# install-cron.sh picks up .local/agent.env as the default --env-file.
+.local/

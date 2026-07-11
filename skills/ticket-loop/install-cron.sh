@@ -11,12 +11,14 @@
 #   EXTERNAL (framework) — the LaunchAgent runs the FRAMEWORK's run-pass.sh against a
 #   SEPARATE target checkout, mirroring the container's boundary rule 2 on bare macOS.
 #   The runner lives outside the work tree it drives (the read-only-runner property):
-#     install-cron.sh --work-tree ~/repos/your-repo --env-file ~/.config/dev-workflow/agent.env
+#     install-cron.sh --work-tree ~/repos/your-repo     # env file defaults to <framework>/.local/agent.env
 #     install-cron.sh --work-tree ~/repos/your-repo --env-file ... --opt --mcp-keyed
 #
 #     --work-tree <path>  the TARGET repo checkout (must be a git repo with
 #                         dev-workflow.yml at its root). Or set DW_WORK_TREE.
-#     --env-file  <path>  an agent.env-style secrets file run-pass.sh sources
+#     --env-file  <path>  an agent.env-style secrets file run-pass.sh sources.
+#                         Default (external mode): <framework>/.local/agent.env when it
+#                         exists — .local/ is gitignored, so secrets stay out of git.
 #                         (LINEAR_API_KEY, TELEGRAM_BOT_TOKEN, AGENT_TELEGRAM_CHAT_ID,
 #                         GH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN). Or set DW_ENV_FILE.
 #     --opt               first copy the runner + plugin root-owned to /opt/dev-workflow
@@ -64,6 +66,13 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# Default secrets location: <framework clone>/.local/agent.env (gitignored). Used only
+# in external-runner mode when --env-file/DW_ENV_FILE wasn't given and the file exists.
+if [ -n "$WORK_TREE" ] && [ -z "$ENV_FILE" ] && [ -f "$FW_ROOT/.local/agent.env" ]; then
+  ENV_FILE="$FW_ROOT/.local/agent.env"
+  echo "using default env file: $ENV_FILE"
+fi
 
 uninstall() {
   launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true

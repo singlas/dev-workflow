@@ -116,14 +116,17 @@ Worked example (framework clone drives a separate target repo, hardened):
 
 ```
 git clone https://github.com/singlas/dev-workflow ~/dev-workflow
+mkdir -p ~/dev-workflow/.local        # gitignored — secrets live with the clone, never in git
+$EDITOR ~/dev-workflow/.local/agent.env && chmod 600 ~/dev-workflow/.local/agent.env
 ~/dev-workflow/skills/ticket-loop/install-cron.sh \
-  --work-tree ~/repos/your-repo --env-file ~/.config/dev-workflow/agent.env \
-  --opt --mcp-keyed
+  --work-tree ~/repos/your-repo --opt --mcp-keyed
 ```
 
 `--work-tree` is the repo the loop builds against (must be a git checkout with a
 `dev-workflow.yml` at its root). `--env-file` is the `agent.env` secrets file
-`run-pass.sh` sources (mode `600`; it's warned about, never printed). `--mcp-keyed`
+`run-pass.sh` sources (mode `600`; it's warned about, never printed) — when omitted,
+the installer defaults to the clone's gitignored `.local/agent.env` if it exists,
+as above. `--mcp-keyed`
 wires the keyed tracker MCP so Linear needs a static `LINEAR_API_KEY` instead of a
 browser OAuth — required on any headless box. `--refresh`/`--uninstall` work as in the
 legacy mode; with no new flags the script is byte-for-byte its old in-tree self.
