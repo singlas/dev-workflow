@@ -128,11 +128,26 @@ $EDITOR ~/dev-workflow/.local/agent.env && chmod 600 ~/dev-workflow/.local/agent
 the installer defaults to the clone's gitignored `.local/agent.env` if it exists,
 as above. `--mcp-keyed`
 wires the keyed tracker MCP so Linear needs a static `LINEAR_API_KEY` instead of a
-browser OAuth — required on any headless box. **Trigger a pass by hand** with
-`install-cron.sh run-now` — it refuses while a pass is already running; add
-`--force` to SIGTERM the running pass (graceful, the lock is released) and start a
-fresh one. `--refresh`/`--uninstall` work as in the
+browser OAuth — required on any headless box. `--refresh`/`--uninstall` work as in the
 legacy mode; with no new flags the script is byte-for-byte its old in-tree self.
+
+**Day-to-day controls — alias the installer once and drive the loop with it:**
+
+```bash
+# ~/.zshrc — set YOUR label + clone path
+alias dw-loop='TICKET_LOOP_LABEL=com.example.ticket-loop ~/dev-workflow/skills/ticket-loop/install-cron.sh'
+
+dw-loop status            # is it alive + what it did today: running pass / work-tree
+                          #   HEAD / digest sent? / scout + idle flags / open questions /
+                          #   pass counts / log tail / next tick
+dw-loop run-now           # trigger a pass by hand (refuses while one is running)
+dw-loop run-now --force   # SIGTERM the running pass (graceful — lock released), start fresh
+```
+
+Watch a pass live with `tail -f <state-dir>/logs/ticket-loop-cron.log`. Don't run
+`dw-telegram poll` by hand to "check messages" — polling advances the shared offset
+and eats updates the loop hasn't seen (`send`/`send-photo`/`send-document` are safe
+anytime).
 
 **Dedicated Mac mini.** For an always-on agent host:
 
