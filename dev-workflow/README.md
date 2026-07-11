@@ -49,6 +49,8 @@ point at any repo.
   `~/.claude/**`, `.claude/settings*`.
 - Never edit the framework — the plugin, the runner scripts, the loop's own
   `SKILL.md`.
+- Never edit the repo's `dev-workflow.yml` — the agent must never edit its own
+  leash (it defines `off_limits` and the diff budget); config changes need a human.
 - Deploys only via the repo's CI-gated promotion. `.github/workflows/**` is
   off-limits.
 
