@@ -1,0 +1,85 @@
+# dev-workflow.yml — per-repo config for the dev-workflow framework.
+# Copy this to your target repo root as `dev-workflow.yml` and edit the
+# values. Validate it with:  python3 dev-workflow/validate.py dev-workflow.yml
+#
+# Boundary rule 1: this config can only TIGHTEN the framework defaults, never
+# loosen them. The baseline guardrails (never push the base/prod branch, no
+# force-push, never read secrets, never edit the framework, deploy only via
+# CI) are framework-side constants — nothing here can switch them off.
+
+# The repository and its branch model.
+repo:
+  url: https://github.com/your-org/your-repo   # remote URL (informational)
+  base_branch: dev                             # the integration trunk; feature PRs land here
+  prod_branch: main                            # the prod mirror; only a dev->main PR deploys
+  branch_prefix: feature                        # auto-numbered work branches: feature-1, feature-2, ...
+
+# The issue tracker — the adapter seam. See tracker-adapters.md for the verbs.
+tracker:
+  provider: linear                # linear is the only implementation today
+  team: Acme                      # the tracker team/workspace name
+  ticket_prefix: ABC              # ticket keys look like ABC-123
+  roles:                          # map framework roles -> your board's own label/state names
+    queue:   { label: agent, states: [Todo, In Progress] }   # the loop picks up work here
+    blocked: { label: agent-blocked }                        # set when a ticket needs a human
+    exclude: { labels: [manual, gated, decision] }           # never auto-worked
+    done:    { state: Done }                                  # set when the PR merges
+
+# The chat channel the agent reports to and asks questions in. Credentials
+# come from the environment (agent.env) — never put tokens in this file.
+chat:
+  provider: telegram
+
+# How to test, lint, and (optionally) install dependencies. `{pkgs}` is
+# substituted with the changed packages for a narrow run.
+quality:
+  test: "scripts/test.sh {pkgs}"
+  lint: "ruff check ."
+  bootstrap: "uv sync"           # optional: run once to install deps before testing
+
+# Versioning + changelog generation for the release step.
+version:
+  file: VERSION
+  scheme: conservative-patch     # bump the patch segment for feature batches
+  changelog: "scripts/changelog.sh"
+
+# How a merge to prod actually deploys, and where to announce it.
+deploy:
+  trigger: push-main-gha         # a push to prod_branch runs the GitHub Actions deploy
+  announce: telegram
+
+# The generated board snapshot the standup skill reads.
+board:
+  snapshot: "scripts/linear-snapshot.sh"
+  views: ".local/board"
+
+# Extra protected paths + the per-PR diff budget. off_limits ADDS to the
+# framework baseline (.env*, *.key, *.pem, credentials.json, .claude/settings*,
+# .github/workflows/**) — it never shrinks it. The budget is tighten-only:
+# max_lines <= 400, max_files <= 15.
+guardrails:
+  off_limits:
+    - "infra/**"
+    - "migrations/**"
+  diff_budget:
+    max_lines: 400
+    max_files: 15
+
+# Build settings for each autonomous pass. cap_per_pass is tighten-only (<= 2).
+build:
+  model: sonnet                  # model id the loop pins each headless pass to
+  cap_per_pass: 2                # max tickets built per loop pass
+
+# When the autonomous loop is allowed to run.
+schedule:
+  window: "09:00-20:00"          # HH:MM-HH:MM local working window
+  tz: America/New_York           # IANA timezone name
+  every: 30m                     # cadence between passes
+
+# Optional: a command run before each loop pass (e.g. refresh the board).
+# hooks:
+#   pre_pass: "scripts/linear-snapshot.sh"
+
+# Optional: where the loop keeps its per-repo state. Defaults to .agent-loop.
+# runtime:
+#   state_dir: ".agent-loop"

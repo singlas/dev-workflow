@@ -3,6 +3,8 @@
 Curated AI prompts for developer workflows — context file generation, codebase documentation, audits, web optimization, and more. Built for teams standardizing on AI-assisted development.
 
 > **⭐ Featured: [`skills/ticket-loop/`](skills/ticket-loop/)** — an autonomous coding agent you manage from a Telegram group. It works your Linear board, asks clarifying questions in the group, and opens one reviewable PR per ticket — no framework, no service to host, just a Claude Code skill + a stdlib-Python bridge. Drop the folder into `.claude/skills/` and follow its README. Full story: [An engineer you manage from a group chat](https://niptao.com/blog/an-engineer-you-manage-from-a-group-chat/).
+>
+> **🧩 [`dev-workflow/`](dev-workflow/)** wraps that agent — plus the `standup`/`cleanup`/`release` skills — into a config-driven framework: **CI, but for ticket work.** A generic runner + Claude Code plugin reads one per-repo `dev-workflow.yml` and works your board inside guardrails a repo can tighten but never loosen. Point it at any codebase.
 
 ## The Problem
 
@@ -34,6 +36,7 @@ ai-dev-prompts/
 ├── web-optimization/        # PageSpeed + SEO/GEO/AEO prompts
 ├── workflows/               # Process & handover prompts
 ├── skills/                  # Claude Code skills — full working agents, not just prompts
+├── dev-workflow/            # The framework: per-repo config contract + validator + tracker seam
 ├── dev-process/             # Full AI-team dev process: branches, worktrees, skills, agent loop
 └── site/                    # HTML guide page + assets
 ```
@@ -114,6 +117,23 @@ ready-to-copy scripts and skill templates:
 | [skills/release.md](dev-process/skills/release.md) | The `dev→main` promotion that deploys — version bump, tag, release PR; merging stays the human's click |
 | [`skills/ticket-loop/`](skills/ticket-loop/) | The autonomous "AI employee" — the drop-in ticket-loop skill (§0) is the agent half of this process: labeled ticket queue, batched questions in team chat, isolated-worktree builds, PR babysitting, daily digest, prompt-injection guardrails |
 
+### 6. Dev Workflow Framework (`dev-workflow/`)
+
+The `dev-process/` playbook and the `skills/ticket-loop/` agent, packaged as a
+config-driven framework — **CI, but for ticket work.** A generic runner + a
+Claude Code plugin read one per-repo `dev-workflow.yml` and work your board
+(pick up tickets, ask questions in team chat, open one reviewable PR each)
+inside framework guardrails a repo can *tighten but never loosen*. Same shape
+as CI: generic runner, per-repo config file, non-escapable guardrails.
+
+| Piece | What It Does |
+|-------|-------------|
+| [README.md](dev-workflow/README.md) | Framework overview: the three zones (framework / target-repo config / injected), the two boundary rules (config tightens-only, runner lives outside the work tree), the baseline guardrails, and distribution (Docker runner + Claude Code plugin) |
+| [dev-workflow.example.yml](dev-workflow/dev-workflow.example.yml) | Annotated full config example — branch model, tracker team/roles, test/lint commands, tightened guardrails, schedule |
+| [validate.py](dev-workflow/validate.py) | Schema + tighten-only validator — rejects unknown keys and any config that tries to raise a ceiling (`python3 dev-workflow/validate.py dev-workflow.yml` → `OK`) |
+| [dw-config.py](dev-workflow/dw-config.py) | Dotted-path config reader shell scripts use (`dw-config.py dev-workflow.yml tracker.team`) |
+| [tracker-adapters.md](dev-workflow/tracker-adapters.md) | The provider seam — canonical verbs (`list_actionable`, `move`, `label`, …) mapped onto a tracker (Linear today; GitHub Issues sketch for adding one) |
+
 ### Coming Soon
 
 - **Copilot instructions generator** — `.github/copilot-instructions.md`
@@ -164,7 +184,8 @@ Hand over a project to a new team
 Set up an AI-assisted dev process for a team
 ├── Branch model + worktrees + GitHub setup → dev-process/README.md
 ├── Session skills (standup/cleanup/release) → dev-process/skills/
-└── Autonomous ticket-working agent          → skills/ticket-loop/
+├── Autonomous ticket-working agent          → skills/ticket-loop/
+└── Config-driven framework for any repo     → dev-workflow/README.md
 ```
 
 ## Design Principles
