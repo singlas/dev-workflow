@@ -113,6 +113,6 @@ Two shapes, one framework:
 | [dev-workflow.example.yml](dev-workflow.example.yml) | Annotated full config example (generic values) |
 | [validate.py](validate.py) | Schema + tighten-only validator (PyYAML) |
 | [dw-config.py](dw-config.py) | Dotted-path config reader for shell callers |
-| [dw-board.py](dw-board.py) | Framework board tool — `snapshot` renders the board views, `prune` reports (or, if opted in, trashes) old Done/Canceled issues. Reads `tracker.team` + `board.*` from config; `LINEAR_API_KEY` from the env only |
+| [dw-board.py](dw-board.py) | Framework board tool — `snapshot` renders the board views, `prune` reports (or, if opted in, trashes) old Done/Canceled issues, `import` bulk-creates issues from a JSON holding file (`<board.views>/import.json`; dry-run unless `--yes`). Reads `tracker.team` + `board.*` from config; `LINEAR_API_KEY` from the env only |
 | [test_validate.py](test_validate.py) | `unittest` suite for the validator |
 | [tracker-adapters.md](tracker-adapters.md) | Canonical verbs → provider mapping (Linear impl) |

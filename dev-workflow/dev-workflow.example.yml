@@ -58,6 +58,7 @@ deploy:
 board:
   snapshot: "scripts/linear-snapshot.sh"   # a command; repos may point this at `dw-board snapshot`
   views: ".local/board"                     # where dw-board renders its throwaway markdown views
+                                            # (also the default home of import.json for `dw-board import`)
   gates: [publifai, launch, migrate]        # ordered gate-label precedence — one <gate>.md view each.
                                             # A flat label list (NO filter DSL). Omit for no gate views.
   prune:                                    # dw-board prune policy. Omit the whole block for defaults.

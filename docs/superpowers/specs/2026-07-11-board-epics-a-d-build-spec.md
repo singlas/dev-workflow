@@ -16,9 +16,10 @@
 3. **The "club" is a shared *rendering* contract, not a config DSL and not shared
    business logic.** A documented "digest section contract" in `ticket-loop/SKILL.md`;
    each feature keeps its own logic (B: detection, D: gating, C: pure label read).
-4. **Import is deferred.** `linear-import.sh` (bulk-create from a JSON holding file) is
-   a hand-run convenience CLI, not wired into config or the loop. Out of scope; port
-   later as a thin standalone if ever wanted.
+4. **Import is ported** (was deferred; owner reversed the call). `dw-board import`
+   ports `linear-import.sh` — bulk-create from a JSON holding file (default
+   `<board.views>/import.json`), dry-run by default, `--yes` to create, team from
+   config, key from env. niptao deletes its `linear-import.sh` after cutover.
 5. **Prune stays, config-gated, delete OFF by default** (see schema). Default =
    report-only (which doubles as Epic B's hygiene input); opt-in to actually trash.
 6. **D uses a DISTINCT marker, not `blocked`.** `roles.blocked.label` already means

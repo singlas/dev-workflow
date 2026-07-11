@@ -6,14 +6,16 @@
 
     dw-board snapshot [--config dev-workflow.yml] [--team NAME] [--out DIR]
     dw-board prune    [--config dev-workflow.yml] [--team NAME] [--days N] [--yes]
+    dw-board import   [FILE] [--config dev-workflow.yml] [--team NAME] [--yes]
 
     uv run dev-workflow/dw-board.py snapshot        # framework checkout (uv supplies PyYAML)
     python3 dev-workflow/dw-board.py snapshot       # bare system python3 (stdlib fallback)
 
-A faithful port of niptao's `scripts/linear-snapshot.sh` + `scripts/linear-prune.sh`,
-parameterized by `dev-workflow.yml`: team, gate labels, output dir, and prune policy
-all come from config; the proven Linear GraphQL queries and bucketing/threshold logic
-are preserved. Talks to Linear over `urllib` (no third-party HTTP dep).
+A faithful port of niptao's `scripts/linear-snapshot.sh` + `scripts/linear-prune.sh`
++ `scripts/linear-import.sh`, parameterized by `dev-workflow.yml`: team, gate labels,
+output dir, prune policy, and the import holding file all come from config; the proven
+Linear GraphQL queries and bucketing/threshold/create logic are preserved. Talks to
+Linear over `urllib` (no third-party HTTP dep).
 
 Credentials come from the ENVIRONMENT ONLY — `LINEAR_API_KEY`, with the same
 `.env` worktree fallback niptao's scripts use (we extract just that one key, never
@@ -440,6 +442,185 @@ def cmd_prune(args):
     return 0 if fail == 0 else 1
 
 
+# ── import ──────────────────────────────────────────────────────────────────
+# Bulk-create issues from a JSON holding file — a faithful port of niptao's
+# linear-import.sh. One difference: niptao resolves the team by KEY; dw-board's
+# convention everywhere else is the team NAME (tracker.team, as used by snapshot/
+# prune), so import resolves teams by name too. Names → ids (project, labels,
+# milestone) are resolved against the live board so you author with human names;
+# labels and milestones must already exist. Dry-run by default; --yes creates.
+IMPORT_RESOLVE = (
+    "query($team: String!) {\n"
+    "  teams(filter: {name: {eq: $team}}) { nodes { id name } }\n"
+    "  projects(first: 50) {\n"
+    "    nodes { id name projectMilestones(first: 50) { nodes { id name } } }\n"
+    "  }\n"
+    "  issueLabels(first: 100) { nodes { id name } }\n"
+    "}"
+)
+IMPORT_CREATE = (
+    "mutation($input: IssueCreateInput!) {\n"
+    "  issueCreate(input: $input) { success issue { identifier url } }\n"
+    "}"
+)
+_PRIORITY = {"urgent": 1, "high": 2, "medium": 3, "low": 4, "none": 0}
+_PRIORITY_NAME = {0: "none", 1: "urgent", 2: "high", 3: "medium", 4: "low"}
+
+
+def _priority_int(name):
+    """Map a priority word to Linear's int; unknown/empty → 0 (none), as niptao."""
+    return _PRIORITY.get(str(name if name is not None else "none").strip().lower(), 0)
+
+
+def _import_file(args, data):
+    """Resolve the input file: positional FILE wins, else <board.views>/import.json
+    (relative to the config dir, mirroring snapshot's out-dir resolution)."""
+    if args.file:
+        return args.file
+    views = _cfg(data, "board.views", ".local/board")
+    base = os.path.dirname(os.path.abspath(args.config))
+    views_dir = views if os.path.isabs(views) else os.path.join(base, views)
+    return os.path.join(views_dir, "import.json")
+
+
+def _print_planned(p):
+    bits = ["project=%s" % p["project"], "priority=%s" % _PRIORITY_NAME[p["priority"]]]
+    if p["milestone_id"]:
+        bits.append("milestone=%s" % p["milestone"])
+    if p["label_ids"]:
+        bits.append("labels=%s" % ",".join(p["labels"]))
+    print("  would create: %s  [%s]" % (p["title"], "  ".join(bits)))
+
+
+def cmd_import(args):
+    key = _resolve_key()
+    if not key:
+        sys.stderr.write("ERROR: LINEAR_API_KEY not set in environment\n")
+        return 1
+
+    data = _load_config(args.config)
+    team = args.team or _cfg(data, "tracker.team")
+    if not team:
+        sys.stderr.write("ERROR: no team — set tracker.team in %s or pass --team\n" % args.config)
+        return 1
+
+    infile = _import_file(args, data)
+    if not os.path.isfile(infile):
+        sys.stderr.write("ERROR: input file not found: %s\n" % infile)
+        return 1
+    try:
+        with open(infile) as fh:
+            rows = json.load(fh)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write("ERROR: could not read %s: %s\n" % (infile, exc))
+        return 1
+    if not isinstance(rows, list):
+        sys.stderr.write("ERROR: %s must be a JSON array of issue objects\n" % infile)
+        return 1
+
+    meta = _gql(key, IMPORT_RESOLVE, {"team": team})
+    team_nodes = (meta.get("teams") or {}).get("nodes") or []
+    if not team_nodes:
+        sys.stderr.write("ERROR: team %r not found on the board\n" % team)
+        return 1
+    team_id = team_nodes[0]["id"]
+    projects = {p["name"]: p for p in (meta.get("projects") or {}).get("nodes") or []}
+    labels_by_name = {l["name"]: l["id"] for l in (meta.get("issueLabels") or {}).get("nodes") or []}
+
+    # Resolve + validate EVERY row up front. Unresolved project/label/milestone
+    # names are hard errors: we name them and create nothing (mirrors niptao's
+    # "labels/milestones must already exist", but fails instead of skipping).
+    planned, errors = [], []
+    for idx, row in enumerate(rows):
+        where = "issue #%d" % (idx + 1)
+        if not isinstance(row, dict):
+            errors.append("%s: not a JSON object" % where)
+            continue
+        title = row.get("title")
+        project = row.get("project")
+        if not title:
+            errors.append("%s: missing required 'title'" % where)
+            continue
+        where = "%s (%s)" % (where, title)
+        if not project:
+            errors.append("%s: missing required 'project'" % where)
+            continue
+        proj = projects.get(project)
+        if proj is None:
+            errors.append("%s: project not found: %r" % (where, project))
+            continue
+
+        want_labels = row.get("labels") or []
+        label_ids = []
+        for name in want_labels:
+            lid = labels_by_name.get(name)
+            if lid is None:
+                errors.append("%s: label not found: %r" % (where, name))
+            else:
+                label_ids.append(lid)
+
+        milestone = row.get("milestone")
+        milestone_id = None
+        if milestone:
+            ms = {m["name"]: m["id"]
+                  for m in (proj.get("projectMilestones") or {}).get("nodes") or []}
+            milestone_id = ms.get(milestone)
+            if milestone_id is None:
+                errors.append("%s: milestone %r not in project %r" % (where, milestone, project))
+
+        planned.append({
+            "title": title,
+            "project": project,
+            "project_id": proj["id"],
+            "priority": _priority_int(row.get("priority")),
+            "labels": list(want_labels),
+            "label_ids": label_ids,
+            "milestone": milestone,
+            "milestone_id": milestone_id,
+            "description": row.get("description") or "",
+        })
+
+    if errors:
+        sys.stderr.write("ERROR: %d unresolved reference(s) — nothing was created:\n" % len(errors))
+        for e in errors:
+            sys.stderr.write("  - %s\n" % e)
+        return 1
+
+    print("linear-import — team=%s  file=%s  issues=%d" % (team, infile, len(planned)))
+    print("Mode: %s" % ("APPLY (will create issues)" if args.yes else "DRY-RUN (no changes)"))
+    print()
+
+    if not args.yes:
+        for p in planned:
+            _print_planned(p)
+        print()
+        print("DRY-RUN — nothing created. Re-run with --yes to import. (%d ready)" % len(planned))
+        return 0
+
+    ok = fail = 0
+    for p in planned:
+        inp = {"teamId": team_id, "title": p["title"],
+               "priority": p["priority"], "projectId": p["project_id"]}
+        if p["description"]:
+            inp["description"] = p["description"]
+        if p["label_ids"]:
+            inp["labelIds"] = p["label_ids"]
+        if p["milestone_id"]:
+            inp["projectMilestoneId"] = p["milestone_id"]
+        result = _gql(key, IMPORT_CREATE, {"input": inp})
+        created = result.get("issueCreate") or {}
+        if created.get("success"):
+            ident = (created.get("issue") or {}).get("identifier")
+            print("  created %s — %s" % (ident, p["title"]))
+            ok += 1
+        else:
+            sys.stderr.write("  FAILED — %s\n" % p["title"])
+            fail += 1
+    print()
+    print("Done: %d created, %d failed. Run dw-board snapshot to refresh views." % (ok, fail))
+    return 0 if fail == 0 else 1
+
+
 def main(argv):
     parser = argparse.ArgumentParser(prog="dw-board", description="Framework board tool (Linear).")
     sub = parser.add_subparsers(dest="cmd")
@@ -456,6 +637,13 @@ def main(argv):
     pp.add_argument("--days", type=int, help="override board.prune.threshold_days")
     pp.add_argument("--yes", action="store_true", help="actually trash (only if allow_delete)")
     pp.set_defaults(func=cmd_prune)
+
+    ip = sub.add_parser("import", help="bulk-create issues from a JSON holding file (dry-run unless --yes)")
+    ip.add_argument("file", nargs="?", help="JSON array of issues (default: <board.views>/import.json)")
+    ip.add_argument("--config", default="dev-workflow.yml", help="path to dev-workflow.yml")
+    ip.add_argument("--team", help="override tracker.team")
+    ip.add_argument("--yes", action="store_true", help="actually create the issues (default: dry-run)")
+    ip.set_defaults(func=cmd_import)
 
     args = parser.parse_args(argv[1:])
     if not getattr(args, "func", None):
