@@ -103,6 +103,34 @@ def check(data):
                         "tracker.roles.%s.%s is required when tracker.roles is set"
                         % (role, attr)
                     )
+            # Optional roles (Epics C/D): when present, each needs a non-empty label.
+            for role in ("flagged", "dep_blocked"):
+                sub = roles.get(role)
+                if sub is not None and (not isinstance(sub, dict) or not _nonempty_str(sub.get("label"))):
+                    errors.append(
+                        "tracker.roles.%s.label must be a non-empty string when set" % role
+                    )
+
+    # board (optional) — gate labels + prune policy. All keys optional; a repo
+    # without them still validates.
+    board = data.get("board")
+    if isinstance(board, dict):
+        gates = board.get("gates")
+        if gates is not None and (
+            not isinstance(gates, list) or not all(isinstance(x, str) for x in gates)
+        ):
+            errors.append("board.gates must be a list of strings")
+        prune = board.get("prune")
+        if prune is not None:
+            if not isinstance(prune, dict):
+                errors.append("board.prune must be a mapping")
+            else:
+                if "allow_delete" in prune and not isinstance(prune["allow_delete"], bool):
+                    errors.append("board.prune.allow_delete must be a boolean")
+                if "threshold_days" in prune:
+                    td = prune["threshold_days"]
+                    if not _is_int(td) or td <= 0:
+                        errors.append("board.prune.threshold_days must be an integer > 0")
 
     # chat.provider must be a known channel when chat is present.
     chat = data.get("chat")

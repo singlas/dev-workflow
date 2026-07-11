@@ -20,7 +20,7 @@ description: >-
 You are the **orchestrator**. You never edit code in this worktree — implementation
 happens in subagents with isolated worktrees. The tracker is the state store; the
 only local state is `state.json` in the loop's state dir (the Telegram offset, the
-`last_digest`/`last_scout` dates, and the `idle_pinged` streak flag).
+`last_digest`/`last_scout`/`last_hygiene` dates, and the `idle_pinged` streak flag).
 
 ## Per-repo configuration (`dev-workflow.yml`)
 
@@ -316,6 +316,24 @@ when there are review comments newer than the branch's last commit, a
 **queue** states, that carry none of the **exclude** labels (also drop this run's
 skip list). Order by tracker priority, then oldest. If none → step 6.
 
+**Dependency gate — sequence before you build.** For each candidate the actionable
+query returns, read its upstream blockers with `get_blockers` (per
+`tracker-adapters.md`: issue relations, or the `Blocked by: ABC-###` description
+convention parsed here). If **any** blocker is not yet in `roles.done.state`, this
+candidate is **not buildable this pass**: `label` it with `roles.dep_blocked.label`
+(inert-but-ready — it keeps its **queue** label and stays on the board, it just isn't
+grabbed) and move to the next candidate. When **every** blocker has reached
+`roles.done.state`, `unlabel` `roles.dep_blocked.label` if present and pick the ticket
+up normally — no manual requeue: each pass re-runs `list_actionable` and re-checks
+blockers from scratch, so a ticket flips from held to buildable on its own the pass
+after its last blocker merges (auto-requeue is free — the 30-min poll does it).
+
+`dep_blocked` is **distinct from `blocked`** and must never be conflated with it:
+`blocked` means "waiting on a human answer" (cleared by a Telegram reply, step 1);
+`dep_blocked` means "waiting on another ticket to finish" (cleared only by that
+blocker reaching **done**). Never Telegram-unblock a `dep_blocked` ticket, never
+count it under `⏳ Blocked on answers`, and never set both labels for the same reason.
+
 ### 4. Triage — investigate first, then build or ask
 
 Read the issue body and **all comments** (earlier Q&A lives there), then
@@ -449,24 +467,82 @@ actionable ticket, go to step 3 instead of sleeping.
 Send at most one digest per calendar day (your team's `schedule.tz`). **When** it
 fires is decided by the step-0 gate above (`last_digest != today`), which runs first
 in the pass — not "the first iteration/pass of the day". An explicit `--report`
-sends it unconditionally. This section is only the *content*. Compose ONE Telegram
-message, sections in this order, **skipping any empty section**:
+sends it unconditionally. This section is only the *content*.
+
+**Board-derived digest section — the shared contract.** Several sections below are
+just a *rendered view of a tracker query*. They share ONE rendering shape — this is
+shared **rendering, not shared business logic** (each section keys on its own role
+and runs its own detection; never merge the B/C/D logic together):
+
+- **Title** — a single emoji + a short label.
+- **Source** — a role-resolved tracker query via the canonical verbs: resolve the
+  role (`blocked`, `flagged`, `dep_blocked`, …) to the repo's own label/state name,
+  never a literal.
+- **Item line** — one ticket per line, `ABC-<n> <title>` plus the one fact that
+  section is about (the outstanding ❓, the blocker keys, the flag one-liner).
+- **Empty ⇒ omit** — no tickets match → the section is not rendered at all.
+
+Every section tagged *(contract)* below is an instance of this shape and nothing
+more; each still owns its own logic. Compose ONE Telegram message, sections in this
+order, **skipping any empty section**:
 
 - **🟢 Merged (last 24h):** agent PRs merged since yesterday's digest — one
   line each: `ABC-<n> <title>`.
 - **👀 Awaiting your review:** open agent PRs with no review activity since
   their last push: `#<num> ABC-<n> <title> (opened <age>)`. Oldest first —
   age is the nudge.
-- **⏳ Blocked on answers:** blocked-labeled tickets, each with the outstanding ❓
-  one-liner and how long it's been waiting. For any unanswered **>24h**, this
-  digest line doubles as the one reminder — also `comment` `🔔 Reminder sent
-  <YYYY-MM-DD>` on the ticket, and never re-remind a ticket already carrying a 🔔
-  comment for the same question.
+- **⏳ Blocked on answers** *(contract; source: `roles.blocked.label`):* one line per
+  blocked-labeled ticket — the outstanding ❓ one-liner and how long it's been
+  waiting. For any unanswered **>24h**, this digest line doubles as the one reminder —
+  also `comment` `🔔 Reminder sent <YYYY-MM-DD>` on the ticket, and never re-remind a
+  ticket already carrying a 🔔 comment for the same question. (This is the
+  human-answer queue — keep it strictly separate from `🔗 Blocked on dependencies`.)
+- **🔗 Blocked on dependencies** *(contract; source: `roles.dep_blocked.label`):* one
+  line per `dep_blocked`-labeled ticket — `ABC-<n> <title> — waiting on <blocker
+  key(s)>`. This is dependency sequencing (step 3's gate), NOT a human answer: never
+  fold it into `⏳ Blocked on answers`, and a `dep_blocked` ticket is never a
+  Telegram-unblock target — it clears only when its blockers reach **done**.
 - **📋 Queued:** count of actionable queue-labeled tickets (and the next one up).
 
 If every section is empty on the daily trigger, send nothing. On an explicit
 `--report`, send `🏁 All quiet — nothing merged, pending, or blocked.` instead
 so the scheduled run is visibly alive.
+
+### Weekly sections (Mondays) — the hygiene sweep
+
+Two more sections are **weekly, not daily**. There is no separate weekly digest —
+they are *appended* to the daily digest on one chosen day (**Monday**). Gate them on
+a `last_hygiene` **date** in `state.json`, modeled exactly on `last_scout` /
+`last_digest`: compute today in `schedule.tz`, and run the weekly sweep only when
+**today is Monday AND `last_hygiene != today`**; stamp `last_hygiene = today`
+immediately after composing the two sections (whether or not they produced any
+lines), so a later Monday pass won't repeat the sweep. Any other weekday, or already
+swept this Monday → skip both weekly sections entirely. Miss a Monday (the loop was
+off) and the sweep simply waits for the next one — dead simple, no catch-up.
+
+- **☑️ Flagged checklist** *(contract; source: `roles.flagged.label`)* — one line per
+  ticket carrying the flagged label: `ABC-<n> <title> — <one-liner>`. This is the
+  weekly "clear these" list. **Self-clearing with zero state:** it is simply
+  re-queried each sweep, so a ticket that got resolved, closed, or had the flag
+  removed drops off the next Monday on its own — there is nothing to un-stamp or
+  clear. Keep it dead simple: a list you look at weekly.
+
+- **🧹 Board hygiene** *(contract-shaped; two inputs, not a single role query)* — the
+  weekly board sweep. **Proportionate: flag + suggest only, in the digest — NEVER
+  auto-close, never auto-prune, never mutate a ticket here.** Two halves, either may
+  be empty:
+  1. **Shipped / deprecated (from prune's report):** regenerate the board with the
+     repo's `board.snapshot` command, then run `dw-board prune` in **report-only**
+     mode (`board.prune.allow_delete` is false by default → it prints a report table
+     and exits without mutating). Surface its finished/stale candidates as lines:
+     `ABC-<n> <title> — Done <age>, safe to prune`. This half *consumes prune's
+     report output*; it never deletes.
+  2. **Drifted premises (agent judgement):** skim open ticket bodies and flag any
+     whose stated premise has drifted — the feature shipped another way, the bug was
+     fixed elsewhere, the assumption no longer holds: `ABC-<n> <title> — premise may
+     have drifted: <why>`. Suggest a human review; do not close it.
+
+  Both halves empty ⇒ omit the section.
 
 ## Loop-level failure
 

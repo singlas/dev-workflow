@@ -83,6 +83,89 @@ class ValidateTests(unittest.TestCase):
         cfg["blog"] = {"skill": "blog-from-session", "posts_dir": "docs/blog"}
         self.assertEqual(_errors_for(cfg), [])
 
+    # ── board (Epic A) + optional roles (Epics C/D) ──────────────────────────
+    def test_board_gates_and_prune_valid_passes(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["board"] = {
+            "views": ".local/board",
+            "gates": ["publifai", "launch", "migrate"],
+            "prune": {"allow_delete": False, "threshold_days": 7},
+        }
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_board_omitted_still_validates(self):
+        # A repo without any board keys is still valid (all optional).
+        self.assertEqual(_errors_for(copy.deepcopy(MINIMAL)), [])
+
+    def test_board_gates_non_list_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["board"] = {"gates": "publifai"}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("board.gates" in e for e in errors), errors)
+
+    def test_board_gates_non_string_item_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["board"] = {"gates": ["publifai", 3]}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("board.gates" in e for e in errors), errors)
+
+    def test_prune_allow_delete_non_bool_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["board"] = {"prune": {"allow_delete": "yes"}}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("allow_delete" in e for e in errors), errors)
+
+    def test_prune_threshold_zero_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["board"] = {"prune": {"threshold_days": 0}}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("threshold_days" in e for e in errors), errors)
+
+    def test_prune_threshold_non_int_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["board"] = {"prune": {"threshold_days": True}}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("threshold_days" in e for e in errors), errors)
+
+    def test_prune_non_mapping_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["board"] = {"prune": "soon"}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("board.prune" in e for e in errors), errors)
+
+    def test_roles_flagged_and_dep_blocked_valid_passes(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["tracker"]["roles"] = {
+            "queue": {"label": "agent", "states": ["Todo"]},
+            "blocked": {"label": "agent-blocked"},
+            "done": {"state": "Done"},
+            "flagged": {"label": "flagged"},
+            "dep_blocked": {"label": "dep-blocked"},
+        }
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_roles_flagged_missing_label_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["tracker"]["roles"] = {
+            "queue": {"label": "agent", "states": ["Todo"]},
+            "blocked": {"label": "agent-blocked"},
+            "done": {"state": "Done"},
+            "flagged": {"note": "oops"},
+        }
+        errors = _errors_for(cfg)
+        self.assertTrue(any("flagged" in e for e in errors), errors)
+
+    def test_roles_dep_blocked_empty_label_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["tracker"]["roles"] = {
+            "queue": {"label": "agent", "states": ["Todo"]},
+            "blocked": {"label": "agent-blocked"},
+            "done": {"state": "Done"},
+            "dep_blocked": {"label": "   "},
+        }
+        errors = _errors_for(cfg)
+        self.assertTrue(any("dep_blocked" in e for e in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()

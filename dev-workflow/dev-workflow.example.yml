@@ -21,9 +21,13 @@ tracker:
   ticket_prefix: ABC              # ticket keys look like ABC-123
   roles:                          # map framework roles -> your board's own label/state names
     queue:   { label: agent, states: [Todo, In Progress] }   # the loop picks up work here
-    blocked: { label: agent-blocked }                        # set when a ticket needs a human
+    blocked: { label: agent-blocked }                        # set when a ticket needs a human ANSWER
     exclude: { labels: [manual, gated, decision] }           # never auto-worked
     done:    { state: Done }                                  # set when the PR merges
+    # Optional roles below. Omit them and everything still validates.
+    flagged:     { label: flagged }      # the weekly "clear these" checklist marker (Epic C)
+    dep_blocked: { label: dep-blocked }  # inert-but-ready: waiting on a BLOCKER TICKET, distinct
+                                         # from `blocked` (which means waiting on a human answer) (Epic D)
 
 # The chat channel the agent reports to and asks questions in. Credentials
 # come from the environment (agent.env) — never put tokens in this file.
@@ -48,10 +52,18 @@ deploy:
   trigger: push-main-gha         # a push to prod_branch runs the GitHub Actions deploy
   announce: telegram
 
-# The generated board snapshot the standup skill reads.
+# The generated board snapshot the standup skill reads. The framework board tool
+# (dw-board.py) reads team + gates + prune policy from here; the LINEAR_API_KEY it
+# needs comes from the ENVIRONMENT only (never put creds in this file).
 board:
-  snapshot: "scripts/linear-snapshot.sh"
-  views: ".local/board"
+  snapshot: "scripts/linear-snapshot.sh"   # a command; repos may point this at `dw-board snapshot`
+  views: ".local/board"                     # where dw-board renders its throwaway markdown views
+  gates: [publifai, launch, migrate]        # ordered gate-label precedence — one <gate>.md view each.
+                                            # A flat label list (NO filter DSL). Omit for no gate views.
+  prune:                                    # dw-board prune policy. Omit the whole block for defaults.
+    allow_delete: false                     # DEFAULT: report only, never mutates. true => may trash
+                                            # (and even then only with --yes at run time)
+    threshold_days: 7                       # Done/Canceled issues closed longer ago than this are candidates
 
 # Extra protected paths + the per-PR diff budget. off_limits ADDS to the
 # framework baseline (.env*, *.key, *.pem, credentials.json, .claude/settings*,

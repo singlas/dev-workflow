@@ -25,6 +25,7 @@ whose boards use different words.
 | `move` (state-role) | ticket key, **state role** (`done`, or a queue state) | Advance lifecycle by *role*, resolved to the board's state name. Never pass a literal state. |
 | `label` / `unlabel` (label-role) | ticket key, **label role** (`queue`, `blocked`, an `exclude` label) | Add/remove a role's label, resolved to the board's label name. E.g. set `blocked` when a ticket needs a human; clear `queue` when done. |
 | `link_pr` | ticket key, PR URL | Attach the opened PR to the ticket so the two are cross-referenced. |
+| `get_blockers` | ticket key (`ABC-123`) | The tickets this one is **blocked by** — its upstream dependencies. Returns each blocker's key and current state, so a loop can check whether every blocker has reached `roles.done.state` before building the dependent ticket. Read-only; used at triage to sequence dependent work. |
 
 ## Linear mapping (the implementation today)
 
@@ -41,10 +42,22 @@ not the key prefix). Names below in `roles.*` are read from `dev-workflow.yml`.
 | `move` (state-role) | `mcp__linear__save_issue` | Update the existing issue's `state` to the name resolved from the role (e.g. `roles.done.state`). |
 | `label` / `unlabel` (label-role) | `mcp__linear__save_issue` | Update the issue's `labels` set — add/remove the name resolved from the role. |
 | `link_pr` | `mcp__linear__create_attachment` | Attach the PR URL to the issue. |
+| `get_blockers` | `mcp__linear__get_issue` (relations) | If the MCP returns the issue's `blocked-by` relations, use them directly. **Fallback convention** (relations not cheaply readable): parse a `Blocked by: ABC-###` line — comma-separated keys allowed — from the ticket description **at triage**; zero adapter work. Either path, `get_ticket` each blocker key to read its current state. |
 
 **Linear MCP has no delete.** The strongest teardown is moving an issue to a
 `Canceled` state — never assume a hard delete exists. Anything the loop
 "removes" is a state/label change, not a deletion.
+
+## The board CLI — a read-only second seam
+
+`dw-board` (the framework board tool) is a *second* way the framework touches the
+tracker, alongside the canonical verbs. It is **read-only except for the
+config-gated `prune`**: `dw-board snapshot` renders throwaway board views (what
+`standup` reads), and `dw-board prune` in its default report-only mode
+(`board.prune.allow_delete: false`) prints finished/stale candidates without
+mutating — exactly the input the loop's weekly `🧹 Board hygiene` digest consumes.
+Every *mutation* the loop performs (labeling `dep_blocked`, commenting, moving
+state) still goes through the canonical verbs above, never the board CLI.
 
 ## Adding a provider
 
@@ -64,7 +77,9 @@ resolving every state/label from `tracker.roles`, never hardcoding names.
 - **Verbs → API.** `get_ticket` = `gh issue view`; `comment` = `gh issue
   comment`; `create_ticket` = `gh issue create`; `move`/`label` = `gh issue
   edit` (labels) or `gh issue close`; `link_pr` = a comment or the PR body's
-  `Closes #N`.
+  `Closes #N`. `get_blockers` = read the issue's task-list / tracked-by
+  references or the same `Blocked by: #N` description convention, then `gh issue
+  view` each blocker for its open/closed state.
 
 Keep the shape identical to the Linear table so a skill written to the verbs
 runs unchanged against either provider.

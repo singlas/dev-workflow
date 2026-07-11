@@ -125,6 +125,7 @@ The framework files:
 | [dev-workflow/dev-workflow.example.yml](dev-workflow/dev-workflow.example.yml) | Annotated full config — branch model, tracker team/roles, test/lint commands, tightened guardrails, schedule |
 | [dev-workflow/validate.py](dev-workflow/validate.py) | Schema + tighten-only validator — rejects unknown keys and any config that raises a ceiling |
 | [dev-workflow/dw-config.py](dev-workflow/dw-config.py) | Dotted-path config reader shell scripts use (`dw-config.py dev-workflow.yml tracker.team`) |
+| [dev-workflow/dw-board.py](dev-workflow/dw-board.py) | Framework board tool — `dw-board snapshot` renders the board views from Linear, `dw-board prune` reports (config-gated) old Done/Canceled tickets. Team + gates + prune policy from config; `LINEAR_API_KEY` from the env only |
 | [dev-workflow/tracker-adapters.md](dev-workflow/tracker-adapters.md) | The provider seam — canonical verbs (`list_actionable`, `move`, `label`, …) mapped onto a tracker (Linear today; GitHub Issues sketch) |
 | [skills/standup/](skills/standup/) · [skills/cleanup/](skills/cleanup/) · [skills/release/](skills/release/) | The session skills — open a session, close it into a PR, promote to prod. Driven entirely by `dev-workflow.yml` |
 | [skills/ticket-loop/](skills/ticket-loop/) | The autonomous agent + its [`docker/`](skills/ticket-loop/docker/) runner packaging |

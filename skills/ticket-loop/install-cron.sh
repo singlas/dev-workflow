@@ -272,7 +272,7 @@ if [ "$USE_OPT" = "1" ]; then
   sudo mkdir -p "$OPT_ROOT/bin" "$OPT_ROOT/plugin"
   sudo cp "$SCRIPT_DIR/run-pass.sh" "$SCRIPT_DIR/cron-run.sh" \
           "$SCRIPT_DIR/loop-lock.sh" "$SCRIPT_DIR/telegram.py" "$OPT_ROOT/bin/"
-  sudo cp "$FW_ROOT/dev-workflow/dw-config.py" "$OPT_ROOT/bin/"
+  sudo cp "$FW_ROOT/dev-workflow/dw-config.py" "$FW_ROOT/dev-workflow/dw-board.py" "$OPT_ROOT/bin/"
   sudo cp -R "$FW_ROOT/.claude-plugin" "$OPT_ROOT/plugin/.claude-plugin"
   sudo cp -R "$FW_ROOT/skills" "$OPT_ROOT/plugin/skills"
   sudo cp "$SCRIPT_DIR/docker/loop-mcp.json" "$OPT_ROOT/loop-mcp.json"
@@ -285,6 +285,10 @@ if [ "$USE_OPT" = "1" ]; then
   # `dw-config dev-workflow.yml <dotted.path>`. Stdlib-only fallback (no PyYAML),
   # so it runs under a bare system python3 via the shebang.
   sudo ln -sf "$OPT_ROOT/bin/dw-config.py" /usr/local/bin/dw-config
+  # PATH-visible board tool — `dw-board snapshot` / `dw-board prune`. Reads
+  # tracker.team + board.* from dev-workflow.yml; LINEAR_API_KEY from the env only.
+  # It imports the sibling dw-config.py (copied above) as its one config reader.
+  sudo ln -sf "$OPT_ROOT/bin/dw-board.py" /usr/local/bin/dw-board
   RUN_PASS="$OPT_ROOT/bin/run-pass.sh"
   PLUGIN_DIR="$OPT_ROOT/plugin"
   MCP_CONFIG="$OPT_ROOT/loop-mcp.json"
