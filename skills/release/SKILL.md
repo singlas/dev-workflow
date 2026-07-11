@@ -35,6 +35,11 @@ This is the one skill in the framework that leads to prod. Two hard rules bind i
 2. **It STOPS after opening the base→prod PR. The human merges.** Merging is what
    deploys, and that stays the human's explicit click — never merge it yourself.
 
+**The one deliberate exception to "never push the base or prod branch directly":**
+this skill pushes the single version-bump commit to `repo.base_branch` (Step 5) —
+an explicit, scoped exception that still reaches prod only via the PR merge. Nothing
+else here pushes a long-lived branch.
+
 **BASELINE (framework-side, non-overridable):** never push the base or prod branch
 directly beyond the version-bump commit this skill makes on the base branch (which
 still lands on prod only via the PR merge); no force-push; deploys only via the
@@ -81,6 +86,10 @@ pre-flight (Step 2) when you want to catch a failure before the CI round-trip.
 3. `git fetch origin --prune`, then bring the base current:
    `git pull --ff-only origin <repo.base_branch>`. Not fast-forwardable → STOP and
    surface why (someone pushed; reconcile first).
+4. Confirm a **clean working tree** (`git status --short` must be empty). If dirty,
+   STOP and tell the human exactly what's uncommitted — don't stash it and don't
+   commit it for them; a release commits only the version bump, so any stray change
+   is theirs to resolve first.
 
 ## Step 1 — absorb hotfixes (keep prod an ancestor of the base branch)
 

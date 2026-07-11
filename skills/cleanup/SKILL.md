@@ -135,6 +135,10 @@ This local step only exists to catch something before the round-trip:
   suite. Reserve a full local run for a genuinely cross-cutting change (shared
   config, a base template, a wide migration).
 
+If `quality.bootstrap` is set and dependencies look stale (or `quality.test` fails
+with import/dependency errors), run `quality.bootstrap` once before the test command,
+then re-run.
+
 **Never push code you have reason to believe is broken** — if you run tests and
 any fail, STOP and fix first. Note in the summary whether you ran tests or relied
 on the session's green run + CI.
