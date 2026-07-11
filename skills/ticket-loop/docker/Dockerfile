@@ -1,0 +1,76 @@
+# dev-workflow ticket-loop agent image.
+#
+# A pinned, self-contained toolbox that runs ONE headless `/ticket-loop` pass. It
+# bakes the runner + the plugin root-owned at /opt/dev-workflow (boundary rule 2);
+# the target-repo checkout, ~/.claude auth, agent.env, and state.json all live in a
+# persistent volume mounted at /home/agent — NOT in the image. So the auth you do
+# once survives every ephemeral `docker run --rm`, and a `git pull` of the work tree
+# can never change how the loop runs (only a rebuild can).
+#
+# Build context is the FRAMEWORK REPO ROOT (this repo), not this directory:
+#   docker build -f skills/ticket-loop/docker/Dockerfile \
+#     --build-arg CLAUDE_CODE_VERSION=<pin> -t <image>:<pin> <repo-root>
+FROM node:22-bookworm-slim
+
+# Pin the Claude Code CLI — NO default, so the caller MUST pin it (verify it against
+# whatever `claude` your team runs before building). The autoupdater is disabled
+# below so this stays put.
+ARG CLAUDE_CODE_VERSION
+ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}
+
+ENV DISABLE_AUTOUPDATER=1 \
+    npm_config_update_notifier=false \
+    PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# System toolchain. Adjust per target repo: git + gh (PRs), curl/ca-certs, jq,
+# python3 + python3-yaml (dw-config.py reads dev-workflow.yml), and uv (Python deps
+# for the quality gate). postgresql-client is here because many stacks' test suites
+# reach a DB — drop it, or extend this list (build-essential, a JS toolchain, …),
+# to match YOUR repo's test dependencies.
+RUN set -eux; \
+    if [ -z "$CLAUDE_CODE_VERSION" ]; then \
+      echo "ERROR: build-arg CLAUDE_CODE_VERSION is required (pin the claude version)"; exit 1; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      git curl ca-certificates gnupg jq python3 python3-yaml postgresql-client; \
+    # GitHub CLI from its own apt repo (Debian doesn't package it)
+    mkdir -p /etc/apt/keyrings; \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list; \
+    apt-get update; apt-get install -y --no-install-recommends gh; \
+    rm -rf /var/lib/apt/lists/*; \
+    # Claude Code CLI, pinned
+    npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}; \
+    # uv (to /usr/local/bin so it's on PATH for every user)
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+# ── Boundary rule 2: bake the runner + plugin root-owned at /opt/dev-workflow ──
+# The mounted volume at /home/agent is the ONLY writable surface; /opt/dev-workflow
+# is owned by root and the container runs as the non-root `agent` user, so a build
+# subagent physically cannot edit the framework driving it.
+COPY skills/ticket-loop/cron-run.sh \
+     skills/ticket-loop/run-pass.sh \
+     skills/ticket-loop/loop-lock.sh \
+     skills/ticket-loop/telegram.py \
+     /opt/dev-workflow/bin/
+COPY dev-workflow/dw-config.py /opt/dev-workflow/bin/
+# The plugin (for --plugin-dir): a copy of the plugin manifest + all skills.
+COPY .claude-plugin/ /opt/dev-workflow/plugin/.claude-plugin/
+COPY skills/ /opt/dev-workflow/plugin/skills/
+# The keyed tracker MCP config the runner passes via TICKET_LOOP_MCP_CONFIG.
+COPY skills/ticket-loop/docker/loop-mcp.json /opt/dev-workflow/loop-mcp.json
+RUN chmod -R 755 /opt/dev-workflow
+
+# Non-root agent user. Its home (/home/agent) is where the persistent volume mounts:
+# ~/.claude (auth), the work-tree checkout, agent.env, state.json, .venv.
+RUN useradd --create-home --shell /bin/bash --uid 10001 agent
+USER agent
+WORKDIR /home/agent
+
+# CMD (not ENTRYPOINT) so a `docker run <image> <cmd>` can override it — e.g. the
+# box driver's `docker run <image> /opt/dev-workflow/bin/run-pass.sh --dry-run`.
+CMD ["/opt/dev-workflow/bin/run-pass.sh"]

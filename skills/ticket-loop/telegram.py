@@ -15,16 +15,21 @@ Subcommands:
                                       the local path (null for text-only messages), `text` the caption.
   send-photo [--ticket ABC-123] [--caption TEXT] <path>
                                       Send an image file to the agent group; prints {"message_id": N}.
+  send-document [--caption TEXT] <path>
+                                      Send a file (e.g. a PDF report) to the agent group; prints {"message_id": N}.
   discover                            Print every chat the bot has recently seen (id, type, title) —
                                       use to grab a new group's chat id. Does not consume updates.
 
 Env (from the environment or repo-root .env): TELEGRAM_BOT_TOKEN, AGENT_TELEGRAM_CHAT_ID.
-State: <repo>/.agent-loop/state.json  {offset, questions: {message_id: "ABC-123"}} — gitignore .agent-loop/.
+State dir: <repo>/.agent-loop by default; override with TICKET_LOOP_STATE_DIR (an
+absolute path, or one relative to the repo root). Holds state.json
+{offset, questions: {message_id: "ABC-123"}} + downloaded media — gitignore it.
 Stdlib only — runs under any python3.
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 import urllib.error
@@ -42,8 +47,19 @@ def find_repo_root() -> Path:
     return Path.cwd()
 
 
+def state_dir() -> Path:
+    """The loop's state dir: TICKET_LOOP_STATE_DIR (absolute, or relative to the
+    repo root) when set, else <repo>/.agent-loop. Keeps the runner, the lock, and
+    this bridge pointed at the same directory across laptop + container layouts."""
+    override = os.environ.get("TICKET_LOOP_STATE_DIR", "").strip()
+    if override:
+        p = Path(override)
+        return p if p.is_absolute() else (REPO_ROOT / p)
+    return REPO_ROOT / ".agent-loop"
+
+
 REPO_ROOT = find_repo_root()
-STATE_PATH = REPO_ROOT / ".agent-loop" / "state.json"
+STATE_PATH = state_dir() / "state.json"
 TICKET_RE = re.compile(r"^\s*([A-Z][A-Z0-9]*-\d+)\b", re.IGNORECASE)
 
 
@@ -244,6 +260,38 @@ def cmd_send_photo(args: argparse.Namespace) -> None:
     print(json.dumps({"message_id": message_id}))
 
 
+def cmd_send_document(args: argparse.Namespace) -> None:
+    """Send a file (e.g. a PDF report) to the agent group via sendDocument."""
+    import uuid
+
+    chat_id = require_env("AGENT_TELEGRAM_CHAT_ID")
+    path = Path(args.path)
+    if not path.is_file():
+        sys.exit(f"error: {path} is not a file")
+    boundary = uuid.uuid4().hex
+    parts = []
+    fields = {"chat_id": chat_id}
+    if args.caption:
+        fields["caption"] = args.caption
+    for name, value in fields.items():
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+        )
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{path.name}"\r\n'
+        f"Content-Type: application/octet-stream\r\n\r\n".encode()
+    )
+    parts.append(path.read_bytes())
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    result = _request(
+        "sendDocument",
+        b"".join(parts),
+        {"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        http_timeout=120,
+    )
+    print(json.dumps({"message_id": result["message_id"]}))
+
+
 def cmd_discover(_args: argparse.Namespace) -> None:
     updates = api("getUpdates", {"timeout": 0}, http_timeout=15)
     seen = {}
@@ -278,6 +326,11 @@ def main() -> None:
     p_photo.add_argument("--caption", help="caption to send with the image")
     p_photo.add_argument("path", help="path to the image file")
     p_photo.set_defaults(func=cmd_send_photo)
+
+    p_doc = sub.add_parser("send-document", help="send a file (e.g. a PDF) to the agent group")
+    p_doc.add_argument("--caption", help="caption to send with the document")
+    p_doc.add_argument("path", help="path to the file to send")
+    p_doc.set_defaults(func=cmd_send_document)
 
     p_disc = sub.add_parser("discover", help="print chats the bot has recently seen")
     p_disc.set_defaults(func=cmd_discover)

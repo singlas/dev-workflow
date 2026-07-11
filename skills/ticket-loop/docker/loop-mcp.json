@@ -1,0 +1,12 @@
+{
+  "_comment": "Loop-only MCP config for headless passes. The runner passes this via TICKET_LOOP_MCP_CONFIG + --strict-mcp-config, so the loop uses ONLY this — NOT the repo's OAuth-based .mcp.json. Linear's hosted MCP accepts a static API key in the Authorization: Bearer header (linear.app/docs/mcp), which removes the interactive-OAuth requirement for unattended runs. LINEAR_API_KEY is sourced from agent.env (600, never read by Claude) and expanded by Claude Code at load time. Swap this block for another tracker's MCP server + its key env-var to change providers.",
+  "mcpServers": {
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "headers": {
+        "Authorization": "Bearer ${LINEAR_API_KEY}"
+      }
+    }
+  }
+}

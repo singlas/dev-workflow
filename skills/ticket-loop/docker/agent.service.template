@@ -1,0 +1,38 @@
+# One headless ticket-loop pass in the pinned container. A TEMPLATE: render the
+# @PLACEHOLDER@ tokens for your deployment (e.g. `sed -e 's|@IMAGE@|myrepo-agent:current|' …`)
+# and install the result at /etc/systemd/system/<name>.service. See docker/README.md.
+#
+# Placeholders: @IMAGE@ (built image tag), @VOLUME@ (persistent home volume),
+# @CONTAINER@ (per-pass container name), @WORK_TREE@ (the checkout inside the volume,
+# e.g. /home/agent/<repo>), @ENV_FILE@ (the secrets file inside the volume,
+# e.g. /home/agent/agent.env), @ONCALENDAR@ (used by the timer, not here).
+#
+# Isolation model: the FILESYSTEM boundary is the win — only the named volume is
+# mounted, so the host's other secrets/checkouts are simply absent. Secrets are NOT
+# passed as unit-level -e (they'd leak into `docker inspect`); the runner sources
+# them from @ENV_FILE@ on the volume itself. --network host lets the pass reach a
+# local DB for the test suite + the internet for GitHub/tracker/LLM/chat; protect the
+# DB with a scoped role, not the network.
+[Unit]
+Description=ticket-loop headless pass
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Kill a hung pass at ~90 min (a foreground build should finish well inside this).
+# Tune to your build times.
+TimeoutStartSec=5400
+ExecStartPre=-/usr/bin/docker rm -f @CONTAINER@
+ExecStart=/usr/bin/docker run --rm --name @CONTAINER@ \
+  --network host \
+  -e DW_WORK_TREE=@WORK_TREE@ \
+  -e DW_ENV_FILE=@ENV_FILE@ \
+  --memory 3g --memory-swap 3g --cpus 1.5 \
+  --pids-limit 512 \
+  -v @VOLUME@:/home/agent \
+  @IMAGE@
+ExecStop=-/usr/bin/docker stop -t 30 @CONTAINER@
+
+[Install]
+WantedBy=multi-user.target

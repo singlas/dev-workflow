@@ -1,0 +1,18 @@
+# Fires the ticket-loop pass on a schedule. A TEMPLATE: render @ONCALENDAR@ (a
+# systemd OnCalendar expression) for your working window and install the result at
+# /etc/systemd/system/<name>.timer alongside the matching .service. See docker/README.md.
+#
+# The box's system timezone decides what OnCalendar times mean — set the box tz to
+# your team's zone so the window matches the launchd/cron one. Example working-hours
+# expression: `*-*-* 09..20:00/30` (every 30 min, 09:00–20:00, on the :00 and :30).
+[Unit]
+Description=ticket-loop schedule
+
+[Timer]
+OnCalendar=@ONCALENDAR@
+Persistent=true
+# If the box was asleep/off at a tick, run once on the next boot — the digest's
+# step-0 owed-recovery + the loop's idempotence make a catch-up pass safe.
+
+[Install]
+WantedBy=timers.target

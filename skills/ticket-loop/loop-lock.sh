@@ -10,12 +10,21 @@
 #   loop-lock.sh release <pid>           # release only if <pid> is the owner
 #   loop-lock.sh status                  # exit 0 + "locked by …", or 1 + "unlocked"
 #
-# Assumes this script lives at <repo>/.claude/skills/ticket-loop/loop-lock.sh; the
-# lock lives at <repo>/.agent-loop/loop.lock alongside the loop's other state.
+# The lock lives at <state_dir>/loop.lock alongside the loop's other state. The state
+# dir is TICKET_LOOP_STATE_DIR when set (absolute, or relative to the repo root) —
+# the container path, where this script is baked outside the work tree — else the
+# legacy <repo>/.agent-loop (this script at <repo>/.claude/skills/ticket-loop/).
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-LOCK="$REPO_ROOT/.agent-loop/loop.lock"
+if [ -n "${TICKET_LOOP_STATE_DIR:-}" ]; then
+  case "$TICKET_LOOP_STATE_DIR" in
+    /*) STATE_DIR="$TICKET_LOOP_STATE_DIR" ;;
+    *)  STATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/$TICKET_LOOP_STATE_DIR" ;;
+  esac
+else
+  STATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/.agent-loop"
+fi
+LOCK="$STATE_DIR/loop.lock"
 PIDF="$LOCK/pid"; OWNERF="$LOCK/owner"
 mkdir -p "$(dirname "$LOCK")"
 

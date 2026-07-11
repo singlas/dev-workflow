@@ -15,10 +15,11 @@ The entire system is this folder:
 | File | What it is |
 |---|---|
 | `SKILL.md` | The orchestrator — a Claude Code skill. The whole agent's behavior, including its security guardrails, lives here in plain English. |
-| `telegram.py` | The Telegram bridge — ~280 lines, Python stdlib only. `send` / `send-photo` / `poll` / `discover` subcommands wrapping `sendMessage`, `sendPhoto`, and long-polled `getUpdates`. Inbound photos are downloaded locally so the agent can look at bug screenshots. |
+| `telegram.py` | The Telegram bridge — Python stdlib only. `send` / `send-photo` / `send-document` / `poll` / `discover` subcommands wrapping `sendMessage`, `sendPhoto`, `sendDocument`, and long-polled `getUpdates`. Inbound photos are downloaded locally so the agent can look at bug screenshots. |
 | `loop-lock.sh` | A shared singleton lock so a scheduled pass and an interactive `/loop` session never run at once (no double-drained Telegram offset, no double-builds). |
-| `cron-run.sh` / `install-cron.sh` | Optional always-on: one headless pass under the lock, plus a macOS launchd installer (adapt for Linux cron/systemd). |
-| `env.example` | The two env vars the bridge needs. |
+| `cron-run.sh` / `run-pass.sh` / `install-cron.sh` | Optional always-on: one headless pass under the lock. `cron-run.sh` is the config-driven runner (laptop launchd or container); `run-pass.sh` is the in-container entrypoint; `install-cron.sh` is the macOS launchd installer (adapt for Linux cron/systemd). |
+| `docker/` | The containerized deployment — `Dockerfile`, `loop-mcp.json`, systemd unit templates, and a runbook (`docker/README.md`). |
+| `env.example` | The two env vars the bridge needs, plus the optional runner env. |
 
 ## What you need (dependencies)
 
@@ -72,6 +73,37 @@ the loop runs headless on a schedule even when no session is open:
   digest rides the first pass of each day. `--refresh` pulls the worktree up to
   `origin/dev`; `--uninstall` removes it. On Linux, point cron or a systemd timer
   at `cron-run.sh` instead.
+
+### Config-driven runner + optional `dev-workflow.yml`
+
+`cron-run.sh` reads the target repo's `dev-workflow.yml` (via
+`dev-workflow/dw-config.py`) when present, so the same runner drives any repo:
+`repo.base_branch` (the branch it resets to and PRs target), `build.model` (pins
+`--model`), `schedule.tz` (the digest's "new day"), `runtime.state_dir`, and a
+`hooks.pre_pass` command run before each pass. With no config file it degrades to
+sane defaults (base `dev`, no `--model`, system timezone, `.agent-loop`). Env vars
+override the config — see `env.example` for `DW_WORK_TREE`, `DW_PLUGIN_DIR`,
+`DW_SKILL_INVOCATION`, `DW_ENV_FILE`, `TICKET_LOOP_STATE_DIR`, and the
+`TICKET_LOOP_*` knobs.
+
+### Run it in a container (systemd timer)
+
+For a headless host, `docker/` packages the loop as a pinned image that bakes the
+runner + plugin root-owned at `/opt/dev-workflow` and runs one pass per tick against
+a mounted work-tree volume. Full runbook: [`docker/README.md`](docker/README.md) —
+build (with a required `CLAUDE_CODE_VERSION` pin), seed the volume, write
+`agent.env`, and render the `agent.service`/`agent.timer` templates. Secrets stay on
+the volume (never baked, never in `docker inspect`).
+
+### Install as a Claude Code plugin
+
+`ticket-loop` ships inside the **`dev-workflow`** plugin (manifest at
+`.claude-plugin/plugin.json`). Install it with `claude plugin install` (plugin name
+`dev-workflow`), or point Claude Code at a checkout with `--plugin-dir <path>` and
+invoke `/dev-workflow:ticket-loop`. The container runner does exactly this — it
+passes `--plugin-dir /opt/dev-workflow/plugin` when the pinned `claude` supports the
+flag, and falls back to a repo-local `/ticket-loop` (with a logged warning) when it
+doesn't.
 
 ## The group-chat grammar
 
