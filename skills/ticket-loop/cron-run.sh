@@ -94,6 +94,11 @@ LOG_DIR="$STATE_DIR/logs"
 LOG="$LOG_DIR/ticket-loop-cron.log"
 LOCKER="$DW_ROOT/loop-lock.sh"
 mkdir -p "$STATE_DIR" "$LOG_DIR"
+# Pass-outcome contract: the skill writes <state>/outcome.json as its last act
+# (the orchestrator classifies the pass from it — see SKILL.md). Delete any
+# stale one here so a crashed/killed pass can never be classified from the
+# PREVIOUS pass's line.
+rm -f "$STATE_DIR/outcome.json"
 
 ts()  { date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
