@@ -54,7 +54,7 @@ docker run --rm -v <volume>:/home/agent node:22-bookworm-slim \
 ```
 
 `dev-workflow.yml` must exist at the checkout root (validate it first with
-`python3 dev-workflow/validate.py dev-workflow.yml`).
+`uv run dev-workflow/validate.py dev-workflow.yml`).
 
 ## 3. Write `agent.env` on the volume (secrets — human only)
 

@@ -1,6 +1,6 @@
 # dev-workflow.yml — per-repo config for the dev-workflow framework.
 # Copy this to your target repo root as `dev-workflow.yml` and edit the
-# values. Validate it with:  python3 dev-workflow/validate.py dev-workflow.yml
+# values. Validate it with:  uv run dev-workflow/validate.py dev-workflow.yml
 #
 # Boundary rule 1: this config can only TIGHTEN the framework defaults, never
 # loosen them. The baseline guardrails (never push the base/prod branch, no

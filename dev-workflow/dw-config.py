@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# dependencies = ["pyyaml"]
+# ///
 """Read one value out of a dev-workflow.yml by dotted path — for shell callers.
 
-    python3 dev-workflow/dw-config.py <yml> <dotted.path> [default]
+    uv run dev-workflow/dw-config.py <yml> <dotted.path> [default]
+    python3 dev-workflow/dw-config.py <yml> <dotted.path> [default]   # needs pyyaml
+
+The PEP 723 header above lets `uv run` supply PyYAML from its cache — no venv,
+no project sync, works on a bare host.
 
 Prints a scalar on one line; prints a list one item per line; exits 1 if the
 path is missing and no default was given (prints the default instead when it

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
+# /// script
+# dependencies = ["pyyaml"]
+# ///
 """Validate a dev-workflow.yml against the framework contract.
+Run with `uv run dev-workflow/validate.py <yml>` (uv supplies PyYAML), or plain
+python3 if pyyaml is installed.
 
 Boundary rule 1: a target-repo config can only TIGHTEN the framework
 defaults, never loosen them. Unknown top-level keys are rejected, and the

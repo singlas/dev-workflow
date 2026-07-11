@@ -49,10 +49,25 @@ DWCONFIG_PY=""
 for _c in "$DW_ROOT/dw-config.py" "$DW_WORK_TREE/dev-workflow/dw-config.py"; do
   [ -f "$_c" ] && { DWCONFIG_PY="$_c"; break; }
 done
+# dw-config.py needs PyYAML, which a system python3 often lacks (macOS ships a bare
+# 3.x). Preferred runner: `uv run` — dw-config.py carries PEP 723 metadata, so uv
+# supplies PyYAML from its cache (no venv, no project sync). Fallbacks: DW_PYTHON,
+# then a python3 that can import yaml.
+DW_RUN=""
+if [ -n "${DW_PYTHON:-}" ]; then
+  DW_RUN="$DW_PYTHON"
+elif command -v uv >/dev/null 2>&1; then
+  DW_RUN="uv run --quiet --no-project"
+elif command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' >/dev/null 2>&1; then
+  DW_RUN="python3"
+fi
+if [ -z "$DW_RUN" ] && [ -f "$CFG" ]; then
+  echo "WARN: neither uv nor a python3 with PyYAML found — dev-workflow.yml values fall back to defaults; install uv, or set DW_PYTHON" >&2
+fi
 # cfg <dotted.path> [default] — prints the config value, else the default, else fails.
 cfg() {
-  if [ -f "$CFG" ] && [ -n "$DWCONFIG_PY" ]; then
-    python3 "$DWCONFIG_PY" "$CFG" "$@" 2>/dev/null && return 0
+  if [ -f "$CFG" ] && [ -n "$DWCONFIG_PY" ] && [ -n "$DW_RUN" ]; then
+    $DW_RUN "$DWCONFIG_PY" "$CFG" "$@" 2>/dev/null && return 0
   fi
   if [ "$#" -ge 2 ]; then printf '%s\n' "$2"; return 0; fi
   return 1

@@ -111,7 +111,7 @@ Changed. If a commit subject is vague, reword it now (amend a not-yet-pushed
 commit). If `version.changelog` is configured, optionally regenerate the view:
 
 ```bash
-python3 dev-workflow/dw-config.py dev-workflow.yml version.changelog   # -> the command (if any)
+uv run dev-workflow/dw-config.py dev-workflow.yml version.changelog   # -> the command (if any)
 # run it to eyeball this branch's entries; the generated view is throwaway
 ```
 

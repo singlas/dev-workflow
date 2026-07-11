@@ -64,14 +64,14 @@ never shrinks it.
 validate:
 
 ```
-python3 dev-workflow/validate.py dev-workflow.yml     # -> OK: dev-workflow.yml
+uv run dev-workflow/validate.py dev-workflow.yml     # -> OK: dev-workflow.yml
 ```
 
 Shell callers read individual values by dotted path:
 
 ```
-python3 dev-workflow/dw-config.py dev-workflow.yml tracker.team        # -> Acme
-python3 dev-workflow/dw-config.py dev-workflow.yml build.model sonnet  # value or default
+uv run dev-workflow/dw-config.py dev-workflow.yml tracker.team        # -> Acme
+uv run dev-workflow/dw-config.py dev-workflow.yml build.model sonnet  # value or default
 ```
 
 The tracker is a swappable adapter — skills speak canonical verbs

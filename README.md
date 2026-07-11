@@ -58,7 +58,7 @@ enumerated in [`skills/ticket-loop/env.example`](skills/ticket-loop/env.example)
 3. **Validate it:**
 
    ```
-   python3 dev-workflow/validate.py dev-workflow.yml     # -> OK: dev-workflow.yml
+   uv run dev-workflow/validate.py dev-workflow.yml     # -> OK: dev-workflow.yml
    ```
 
    The validator rejects unknown keys and any config that tries to *loosen* a

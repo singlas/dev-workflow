@@ -31,7 +31,7 @@ This is the one skill in the framework that leads to prod. Two hard rules bind i
    in `dev-workflow.yml`.** A mis-set deploy trigger is a bad prod push — so the
    skill never guesses what deploys or where. If either is absent, STOP immediately
    and tell the human to configure them (and validate with
-   `python3 dev-workflow/validate.py dev-workflow.yml`) before releasing.
+   `uv run dev-workflow/validate.py dev-workflow.yml`) before releasing.
 2. **It STOPS after opening the base→prod PR. The human merges.** Merging is what
    deploys, and that stays the human's explicit click — never merge it yourself.
 
@@ -113,7 +113,7 @@ the authoritative gate, so the default `release` does **not** re-run it locally.
 before the round-trip — the bare `quality.test` (no `{pkgs}` → the full suite):
 
 ```bash
-python3 dev-workflow/dw-config.py dev-workflow.yml quality.test   # -> the command
+uv run dev-workflow/dw-config.py dev-workflow.yml quality.test   # -> the command
 # run it with no {pkgs} substitution for the full suite
 ```
 
@@ -144,7 +144,7 @@ The changelog is generated from git history, not hand-edited. After writing the 
 version, regenerate the view so it reflects the bump:
 
 ```bash
-python3 dev-workflow/dw-config.py dev-workflow.yml version.changelog   # -> the command
+uv run dev-workflow/dw-config.py dev-workflow.yml version.changelog   # -> the command
 # run it; the generated view is not committed
 ```
 

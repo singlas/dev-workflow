@@ -14,6 +14,11 @@
 # unit-level -e (so they never show up in `docker inspect`).
 set -euo pipefail
 
+# A scheduler (launchd/systemd) hands us almost no environment — make sure the
+# usual tool homes (uv, claude, gh, brew) are reachable in native mode too. In the
+# container the image PATH already covers these; prepending is harmless there.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 # Where this runner + its siblings (cron-run.sh, dw-config.py) are baked.
 DW_ROOT="${DW_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
@@ -32,10 +37,21 @@ fi
 : "${DW_WORK_TREE:?DW_WORK_TREE must be set (the target-repo checkout, e.g. /home/agent/<repo>)}"
 
 # Per-repo config (base branch, dependency bootstrap) — read via the baked dw-config.py.
+# Preferred runner: `uv run` (dw-config.py carries PEP 723 metadata, uv supplies
+# PyYAML). Fallbacks: DW_PYTHON, then a python3 that can import yaml. Same dance as
+# cron-run.sh, which re-resolves for itself.
 CFG="$DW_WORK_TREE/dev-workflow.yml"
+DW_RUN=""
+if [ -n "${DW_PYTHON:-}" ]; then
+  DW_RUN="$DW_PYTHON"
+elif command -v uv >/dev/null 2>&1; then
+  DW_RUN="uv run --quiet --no-project"
+elif command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' >/dev/null 2>&1; then
+  DW_RUN="python3"
+fi
 cfg() {  # cfg <dotted.path> [default]
-  if [ -f "$CFG" ] && [ -f "$DW_ROOT/dw-config.py" ]; then
-    python3 "$DW_ROOT/dw-config.py" "$CFG" "$@" 2>/dev/null && return 0
+  if [ -f "$CFG" ] && [ -f "$DW_ROOT/dw-config.py" ] && [ -n "$DW_RUN" ]; then
+    $DW_RUN "$DW_ROOT/dw-config.py" "$CFG" "$@" 2>/dev/null && return 0
   fi
   if [ "$#" -ge 2 ]; then printf '%s\n' "$2"; return 0; fi
   return 1

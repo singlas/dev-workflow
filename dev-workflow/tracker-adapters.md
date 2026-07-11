@@ -10,7 +10,7 @@ against Linear, so a second provider is a new mapping table, not a rewrite.
 `dev-workflow.yml`.** A skill must never hardcode `agent`, `Todo`, `Done`,
 `agent-blocked`, etc. It resolves the *role* (`queue`, `blocked`, `exclude`,
 `done`) to the repo's own names at runtime — read them with
-`dw-config.py`, e.g. `python3 dev-workflow/dw-config.py dev-workflow.yml
+`dw-config.py`, e.g. `uv run dev-workflow/dw-config.py dev-workflow.yml
 tracker.roles.queue.label`. That is what lets the same skill drive two repos
 whose boards use different words.
 
