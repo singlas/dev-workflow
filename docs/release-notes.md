@@ -1,10 +1,15 @@
 # Release notes
 
-## Unreleased — targets v0.4.0
+## v0.4.0
 
-Not tagged yet. On `main` after `v0.3.0`.
+### Telegram verbs — flag, list & prune questions (loop)
+- **`flag: <what needs clearing>`** / **`flag NIP-123`** — file + flag, or flag an
+  existing ticket, onto the weekly cleanup checklist (never queued for a build).
+- **`questions`** / **`open questions`** — the loop replies with the open-question list.
+- **`prune questions`** — the loop clears every question whose ticket is already
+  Done/Canceled and releases the block.
 
-### Manage open clarifying questions
+### Manage open clarifying questions (CLI)
 - **`dw-loop questions`** — list the loop's open clarifying questions (ticket, age, text).
 - **`dw-loop questions --clear <id|TICKET>`** — drop a stale entry. Pure state edit:
   never sends to Telegram, never advances the Telegram offset.
