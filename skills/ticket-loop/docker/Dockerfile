@@ -58,8 +58,10 @@ COPY skills/ticket-loop/cron-run.sh \
      skills/ticket-loop/run-pass.sh \
      skills/ticket-loop/loop-lock.sh \
      skills/ticket-loop/telegram.py \
+     skills/ticket-loop/orchestrator/orchestrator.sh \
+     skills/ticket-loop/orchestrator/orch.py \
      /opt/dev-workflow/bin/
-COPY dev-workflow/dw-config.py /opt/dev-workflow/bin/
+COPY dev-workflow/dw-config.py dev-workflow/queue-count.py /opt/dev-workflow/bin/
 # The plugin (for --plugin-dir): a copy of the plugin manifest + all skills.
 COPY .claude-plugin/ /opt/dev-workflow/plugin/.claude-plugin/
 COPY skills/ /opt/dev-workflow/plugin/skills/
@@ -77,4 +79,8 @@ WORKDIR /home/agent
 
 # CMD (not ENTRYPOINT) so a `docker run <image> <cmd>` can override it — e.g. the
 # box driver's `docker run <image> /opt/dev-workflow/bin/run-pass.sh --dry-run`.
+# Default CMD stays the ONE-SHOT pass (the systemd timer shape runs the image
+# with no command — swapping this would silently daemonize existing
+# deployments). The multi-project orchestrator is started explicitly:
+#   docker run … <image> /opt/dev-workflow/bin/orchestrator.sh
 CMD ["/opt/dev-workflow/bin/run-pass.sh"]

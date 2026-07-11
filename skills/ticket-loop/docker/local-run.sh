@@ -85,6 +85,10 @@ cmd_seed() {
       git clone --branch '$branch' '$url' '/home/agent/$name'"
   docker run --rm -v "$VOLUME":/home/agent "$NODE_IMAGE" \
     chown -R 10001:10001 "/home/agent/$name"
+  # Orchestrator work-tree guard: mark this clone as orchestrator-ownable
+  # (roster entries without this marker are refused at startup).
+  docker run --rm -v "$VOLUME":/home/agent "$NODE_IMAGE" \
+    bash -lc "touch '/home/agent/$name/.dw-agent-clone' && chown 10001:10001 '/home/agent/$name/.dw-agent-clone'"
   echo "Seeded /home/agent/$name. Ensure dev-workflow.yml is at its root."
 }
 
