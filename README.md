@@ -51,7 +51,10 @@ questions), opening one reviewable PR per ticket — then babysitting it:
 addressing review comments and red CI, healing merge conflicts, closing the
 ticket when the PR merges, and reporting in with a daily digest. No framework —
 one skill file + one stdlib-Python Telegram bridge; copy the folder into
-`.claude/skills/` and follow its README. More skills coming.
+`.claude/skills/` and follow its README. Alongside it are the three session
+skills — [`skills/standup/`](skills/standup/), [`skills/cleanup/`](skills/cleanup/),
+[`skills/release/`](skills/release/) — real plugin skills that open/close a dev
+session and promote to prod, all driven by one `dev-workflow.yml`. More skills coming.
 
 ### 1. Context File Generators (`context-files/`)
 
@@ -112,9 +115,9 @@ ready-to-copy scripts and skill templates:
 | [README.md](dev-process/README.md) | The playbook: two-branch model (`dev` trunk / `main` = prod mirror, deploys only via a deliberate `dev→main` PR), GitHub setup (branch ruleset + auto-delete head branches, with ready `gh api` commands), worktree slots for parallel agent sessions, the daily loop |
 | [scripts/worktree-reset.sh](dev-process/scripts/worktree-reset.sh) | Fresh auto-numbered branch off latest `dev` per worktree slot; symlinks shared per-machine state; garbage-collects dead worktrees + merged branches (`--gc`) |
 | [scripts/ship-preflight.sh](dev-process/scripts/ship-preflight.sh) | The deterministic git dance behind "wrap up and open a PR" — assess + sync-push in two reviewable calls |
-| [skills/standup.md](dev-process/skills/standup.md) | Session opener — board orientation, hygiene line, 2-4 recommended starting points |
-| [skills/cleanup.md](dev-process/skills/cleanup.md) | Session closer — commit, push, PR into `dev`, close tickets, handoff notes |
-| [skills/release.md](dev-process/skills/release.md) | The `dev→main` promotion that deploys — version bump, tag, release PR; merging stays the human's click |
+| [skills/standup/](skills/standup/) | Session opener — board orientation + 2-4 recommended starting points. Real plugin skill, driven by `dev-workflow.yml` (stub: [dev-process/skills/standup.md](dev-process/skills/standup.md)) |
+| [skills/cleanup/](skills/cleanup/) | Session closer — commit, push, PR into the base branch, close tickets, handoff notes. Real plugin skill (stub: [dev-process/skills/cleanup.md](dev-process/skills/cleanup.md)) |
+| [skills/release/](skills/release/) | The base→prod promotion that deploys — version bump, tag, release PR; **refuses without `prod_branch`/`deploy.trigger`**; merging stays the human's click. Real plugin skill (stub: [dev-process/skills/release.md](dev-process/skills/release.md)) |
 | [`skills/ticket-loop/`](skills/ticket-loop/) | The autonomous "AI employee" — the drop-in ticket-loop skill (§0) is the agent half of this process: labeled ticket queue, batched questions in team chat, isolated-worktree builds, PR babysitting, daily digest, prompt-injection guardrails |
 
 ### 6. Dev Workflow Framework (`dev-workflow/`)
@@ -183,7 +186,7 @@ Hand over a project to a new team
 
 Set up an AI-assisted dev process for a team
 ├── Branch model + worktrees + GitHub setup → dev-process/README.md
-├── Session skills (standup/cleanup/release) → dev-process/skills/
+├── Session skills (standup/cleanup/release) → skills/{standup,cleanup,release}/
 ├── Autonomous ticket-working agent          → skills/ticket-loop/
 └── Config-driven framework for any repo     → dev-workflow/README.md
 ```

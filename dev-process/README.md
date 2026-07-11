@@ -17,12 +17,16 @@ dev-process/
 │   ├── worktree-reset.sh        # fresh feature branch per worktree slot + garbage collection
 │   └── ship-preflight.sh        # the deterministic git dance behind "wrap up and PR"
 └── skills/
-    ├── standup.md               # session opener — orient on the board, pick work
-    ├── cleanup.md               # session closer — commit, push, PR into dev, close tickets
-    └── release.md               # the dev→main promotion that deploys
+    ├── standup.md               # pointer stub → ../skills/standup/ (real plugin skill)
+    ├── cleanup.md               # pointer stub → ../skills/cleanup/ (real plugin skill)
+    └── release.md               # pointer stub → ../skills/release/ (real plugin skill)
 ```
 
-The autonomous agent employee lives at the repo root as a complete drop-in package:
+The three session skills are now real, installable plugin skills at the repo root —
+[`skills/standup/`](../skills/standup/), [`skills/cleanup/`](../skills/cleanup/),
+[`skills/release/`](../skills/release/) — config-driven off `dev-workflow.yml` (no
+`[PLACEHOLDER]` markers to hand-edit). The stubs above just point to them. The
+autonomous agent employee lives alongside them:
 [`../skills/ticket-loop/`](../skills/ticket-loop/) (SKILL.md + Telegram bridge +
 env example) — section 5 below explains how it fits this process.
 
@@ -163,8 +167,10 @@ Principles that make this work with agents:
 - **The agent never merges to prod.** Opening the `dev→main` PR is scripted; merging it
   is the human's explicit action, every time.
 
-The three files in `skills/` are genericized templates — search for `[PLACEHOLDER]`
-markers (test command, tracker names, chat channel) and adapt.
+The three session skills are real plugin skills ([`../skills/standup/`](../skills/standup/),
+[`cleanup/`](../skills/cleanup/), [`release/`](../skills/release/)) driven by
+`dev-workflow.yml` — install the `dev-workflow` plugin or copy the folders into
+`.claude/skills/`, set the config once, and there's nothing per-skill to hand-edit.
 
 ---
 
