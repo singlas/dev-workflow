@@ -42,8 +42,14 @@ API = "https://api.linear.app/graphql"
 def _dw_config():
     """Import the sibling dw-config.py as a module (its name has a hyphen, so it
     is not directly importable). Reuses its PyYAML-or-stdlib loader and get()."""
-    here = os.path.dirname(os.path.abspath(__file__))
+    # realpath (not abspath) resolves the /usr/local/bin/dw-board symlink to the
+    # real file in /opt/.../bin, so dw-config.py is found next to it there rather
+    # than looked for in /usr/local/bin (where only the dw-config symlink lives).
+    here = os.path.dirname(os.path.realpath(__file__))
     path = os.path.join(here, "dw-config.py")
+    if not os.path.isfile(path):
+        sys.exit("ERROR: dw-config.py not found next to dw-board.py (looked in %s) "
+                 "— they install together; run the framework installer." % here)
     spec = importlib.util.spec_from_file_location("dw_config", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
