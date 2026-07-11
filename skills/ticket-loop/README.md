@@ -131,10 +131,15 @@ wires the keyed tracker MCP so Linear needs a static `LINEAR_API_KEY` instead of
 browser OAuth — required on any headless box. `--refresh`/`--uninstall` work as in the
 legacy mode; with no new flags the script is byte-for-byte its old in-tree self.
 
-**Day-to-day controls — alias the installer once and drive the loop with it:**
+**Day-to-day controls — drive the loop with `dw-loop`:**
+
+A hardened (`--opt`) install writes `/usr/local/bin/dw-loop` for you — a real command
+in any shell, pinned to that install's label (no alias needed). On a clone-mode install
+(no `--opt`), set the alias yourself:
 
 ```bash
-# ~/.zshrc — set YOUR label + clone path
+# ~/.zshrc — clone-mode only; --opt installs create dw-loop on PATH already.
+# Set YOUR label + clone path.
 alias dw-loop='TICKET_LOOP_LABEL=com.example.ticket-loop ~/dev-workflow/skills/ticket-loop/install-cron.sh'
 
 dw-loop status            # is it alive + what it did today: running pass / work-tree

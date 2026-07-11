@@ -315,6 +315,16 @@ if [ "$USE_OPT" = "1" ]; then
   # tracker.team + board.* from dev-workflow.yml; LINEAR_API_KEY from the env only.
   # It imports the sibling dw-config.py (copied above) as its one config reader.
   sudo ln -sf "$OPT_ROOT/bin/dw-board.py" /usr/local/bin/dw-board
+  # PATH-visible loop admin — `dw-loop status | run-now | questions | --opt …`.
+  # NOT a symlink into /opt like the tools above: dw-loop IS this installer, which
+  # must run FROM this checkout (it copies files out of it). So it's a tiny wrapper
+  # that pins the label this install used and execs the checkout's installer —
+  # a real command in any shell, replacing the hand-written ~/.zshrc alias.
+  sudo tee /usr/local/bin/dw-loop >/dev/null <<DWLOOP
+#!/bin/sh
+exec env TICKET_LOOP_LABEL='$LABEL' '$SCRIPT_DIR/install-cron.sh' "\$@"
+DWLOOP
+  sudo chmod 755 /usr/local/bin/dw-loop
   RUN_PASS="$OPT_ROOT/bin/run-pass.sh"
   PLUGIN_DIR="$OPT_ROOT/plugin"
   MCP_CONFIG="$OPT_ROOT/loop-mcp.json"
@@ -359,5 +369,6 @@ echo "  work tree : $WORK_TREE"
 echo "  plugin    : $PLUGIN_DIR"
 [ -n "$ENV_FILE" ] && echo "  env file  : $ENV_FILE (secrets — sourced by run-pass.sh, never printed)"
 [ "$MCP_KEYED" = "1" ] && echo "  mcp       : keyed ($MCP_CONFIG)"
+[ "$USE_OPT" = "1" ] && echo "  dw-loop   : /usr/local/bin/dw-loop (real command — you can drop the ~/.zshrc alias)"
 echo "  plist     : $PLIST"
 echo "  logs      : $STATE_DIR/logs/ticket-loop-cron.log"
