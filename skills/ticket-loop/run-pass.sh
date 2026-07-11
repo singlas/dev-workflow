@@ -38,15 +38,15 @@ fi
 
 # Per-repo config (base branch, dependency bootstrap) — read via the baked dw-config.py.
 # Preferred runner: `uv run` (dw-config.py carries PEP 723 metadata, uv supplies
-# PyYAML). Fallbacks: DW_PYTHON, then a python3 that can import yaml. Same dance as
-# cron-run.sh, which re-resolves for itself.
+# PyYAML). Fallbacks: DW_PYTHON, then a bare python3 — dw-config.py has a stdlib-only
+# YAML fallback, so it runs without PyYAML. Same dance as cron-run.sh.
 CFG="$DW_WORK_TREE/dev-workflow.yml"
 DW_RUN=""
 if [ -n "${DW_PYTHON:-}" ]; then
   DW_RUN="$DW_PYTHON"
 elif command -v uv >/dev/null 2>&1; then
   DW_RUN="uv run --quiet --no-project"
-elif command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' >/dev/null 2>&1; then
+elif command -v python3 >/dev/null 2>&1; then
   DW_RUN="python3"
 fi
 cfg() {  # cfg <dotted.path> [default]

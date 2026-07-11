@@ -27,8 +27,10 @@ explicit authorization to push and open a PR.
 
 ## Per-repo configuration (`dev-workflow.yml`)
 
-Resolve every repo-specific value from `dev-workflow.yml` with `python3
-dev-workflow/dw-config.py dev-workflow.yml <dotted.path> [default]`:
+Resolve every repo-specific value from `dev-workflow.yml` with
+`dw-config dev-workflow.yml <dotted.path> [default]`. (`dw-config` is on PATH in a
+consuming repo after a hardened install; from the framework checkout it is
+`uv run dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.)
 
 - `repo.base_branch` — the integration trunk every feature PR targets. Merging a
   PR into it does **not** deploy.
@@ -111,7 +113,7 @@ Changed. If a commit subject is vague, reword it now (amend a not-yet-pushed
 commit). If `version.changelog` is configured, optionally regenerate the view:
 
 ```bash
-uv run dev-workflow/dw-config.py dev-workflow.yml version.changelog   # -> the command (if any)
+dw-config dev-workflow.yml version.changelog   # -> the command (if any)
 # run it to eyeball this branch's entries; the generated view is throwaway
 ```
 

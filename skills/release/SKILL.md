@@ -49,8 +49,10 @@ or `.github/workflows/**`.
 
 ## Per-repo configuration (`dev-workflow.yml`)
 
-Resolve every value from `dev-workflow.yml` with `python3
-dev-workflow/dw-config.py dev-workflow.yml <dotted.path> [default]`:
+Resolve every value from `dev-workflow.yml` with
+`dw-config dev-workflow.yml <dotted.path> [default]`. (`dw-config` is on PATH in a
+consuming repo after a hardened install; from the framework checkout it is
+`uv run dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.)
 
 - `repo.base_branch` — the trunk you release *from*. `repo.prod_branch` — the prod
   mirror you release *to* (**required**; refuse if unset).
@@ -113,7 +115,7 @@ the authoritative gate, so the default `release` does **not** re-run it locally.
 before the round-trip — the bare `quality.test` (no `{pkgs}` → the full suite):
 
 ```bash
-uv run dev-workflow/dw-config.py dev-workflow.yml quality.test   # -> the command
+dw-config dev-workflow.yml quality.test   # -> the command
 # run it with no {pkgs} substitution for the full suite
 ```
 
@@ -144,7 +146,7 @@ The changelog is generated from git history, not hand-edited. After writing the 
 version, regenerate the view so it reflects the bump:
 
 ```bash
-uv run dev-workflow/dw-config.py dev-workflow.yml version.changelog   # -> the command
+dw-config dev-workflow.yml version.changelog   # -> the command
 # run it; the generated view is not committed
 ```
 

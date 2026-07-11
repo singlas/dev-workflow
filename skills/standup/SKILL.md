@@ -27,8 +27,10 @@ Progress, don't open worktrees. Surface, recommend, then let the human pick.
 ## Per-repo configuration (`dev-workflow.yml`)
 
 Everything repo-specific comes from `dev-workflow.yml` at the target-repo root —
-resolve a value with `uv run dev-workflow/dw-config.py dev-workflow.yml
-<dotted.path> [default]`. Never hardcode a team, label, state, or command:
+resolve a value with `dw-config dev-workflow.yml <dotted.path> [default]`.
+(`dw-config` is on PATH in a consuming repo after a hardened install; from the
+framework checkout it is `uv run dev-workflow/dw-config.py dev-workflow.yml
+<dotted.path>`.) Never hardcode a team, label, state, or command:
 
 - `board.snapshot` — the command that regenerates the board views (e.g. a
   tracker-export script). `board.views` — the directory it writes them to.
@@ -48,7 +50,7 @@ Regenerate the snapshot so the views are current — never reason off a stale
 `board.views`:
 
 ```bash
-uv run dev-workflow/dw-config.py dev-workflow.yml board.snapshot   # -> the command
+dw-config dev-workflow.yml board.snapshot   # -> the command
 # run that command
 ```
 

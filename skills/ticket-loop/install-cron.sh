@@ -281,6 +281,10 @@ if [ "$USE_OPT" = "1" ]; then
   # PATH-visible Telegram bridge — a public CLI for repo skills/scripts to send
   # to the team group (send / send-photo / send-document / poll / discover).
   sudo ln -sf "$OPT_ROOT/bin/telegram.py" /usr/local/bin/dw-telegram
+  # PATH-visible config reader — repo skills resolve dev-workflow.yml with
+  # `dw-config dev-workflow.yml <dotted.path>`. Stdlib-only fallback (no PyYAML),
+  # so it runs under a bare system python3 via the shebang.
+  sudo ln -sf "$OPT_ROOT/bin/dw-config.py" /usr/local/bin/dw-config
   RUN_PASS="$OPT_ROOT/bin/run-pass.sh"
   PLUGIN_DIR="$OPT_ROOT/plugin"
   MCP_CONFIG="$OPT_ROOT/loop-mcp.json"

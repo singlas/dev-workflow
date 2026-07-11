@@ -24,8 +24,10 @@ that stays a deliberate human step (see *Publishing* below).
 
 ## Per-repo configuration (`dev-workflow.yml`)
 
-Resolve config with `uv run dev-workflow/dw-config.py dev-workflow.yml
-<dotted.path> [default]`:
+Resolve config with `dw-config dev-workflow.yml <dotted.path> [default]`
+(`dw-config` is on PATH in a consuming repo after a hardened install; from the
+framework checkout it is `uv run dev-workflow/dw-config.py dev-workflow.yml
+<dotted.path>`):
 
 - `blog.posts_dir` — where the draft is written. **Default `docs/blog/`** when
   unset.
