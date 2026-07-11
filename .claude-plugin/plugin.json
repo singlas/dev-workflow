@@ -1,7 +1,7 @@
 {
   "name": "dev-workflow",
   "description": "HCode dev-workflow: standup/cleanup/release skills + the ticket-loop autonomous agent, configured per-repo by dev-workflow.yml",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "HCode Technologies"
   }
