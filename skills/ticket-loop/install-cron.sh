@@ -54,22 +54,56 @@ MCP_KEYED=0
 ACTION=install
 
 FORCE=0
+QARGS=()   # passthrough flags for the `questions` forwarder (--json / --clear X)
 while [ $# -gt 0 ]; do
   case "$1" in
     --uninstall|uninstall) ACTION=uninstall ;;
     --refresh|refresh)     ACTION=refresh ;;
     run-now|--run-now)     ACTION=run-now ;;
     status|--status)       ACTION=status ;;
+    questions|--questions) ACTION=questions ;;
     --force)     FORCE=1 ;;
+    --json)      QARGS+=("--json") ;;
+    --clear)     shift; [ -n "${1:-}" ] || { echo "ERROR: --clear needs an id or ticket key" >&2; exit 2; }; QARGS+=(--clear "$1") ;;
     --work-tree) shift; WORK_TREE="${1:-}"; [ -n "$WORK_TREE" ] || { echo "ERROR: --work-tree needs a path" >&2; exit 2; } ;;
     --env-file)  shift; ENV_FILE="${1:-}";  [ -n "$ENV_FILE" ]  || { echo "ERROR: --env-file needs a path"  >&2; exit 2; } ;;
     --opt)       USE_OPT=1 ;;
     --mcp-keyed) MCP_KEYED=1 ;;
     install|"")  : ;;
-    *) echo "usage: install-cron.sh [--work-tree <path>] [--env-file <path>] [--opt] [--mcp-keyed] [--refresh|--uninstall] | run-now [--force] | status" >&2; exit 2 ;;
+    *) echo "usage: install-cron.sh [--work-tree <path>] [--env-file <path>] [--opt] [--mcp-keyed] [--refresh|--uninstall] | run-now [--force] | status | questions [--clear <id|TICKET>] [--json]" >&2; exit 2 ;;
   esac
   shift
 done
+
+# Resolve the loop's work tree + state dir the way the runner does, from the plist:
+# WT  <- EnvironmentVariables.DW_WORK_TREE
+# SD  <- EnvironmentVariables.TICKET_LOOP_STATE_DIR, else dev-workflow.yml
+#        runtime.state_dir, else .agent-loop; normalized to an absolute path.
+# Shared by `status` and `questions` so the two never drift. Sets globals WT + SD.
+resolve_state_dir() {
+  WT="$(plutil -extract EnvironmentVariables.DW_WORK_TREE raw "$PLIST" 2>/dev/null || true)"
+  SD="$(plutil -extract EnvironmentVariables.TICKET_LOOP_STATE_DIR raw "$PLIST" 2>/dev/null || true)"
+  if [ -z "$SD" ] && [ -n "$WT" ] && [ -f "$WT/dev-workflow.yml" ]; then
+    SD="$(cd "$WT" 2>/dev/null && { command -v uv >/dev/null 2>&1 \
+      && uv run --quiet --no-project "$FW_ROOT/dev-workflow/dw-config.py" dev-workflow.yml runtime.state_dir .agent-loop 2>/dev/null \
+      || echo .agent-loop; })"
+  fi
+  SD="${SD:-.agent-loop}"
+  case "$SD" in /*) : ;; *) SD="$WT/$SD" ;; esac
+}
+
+# questions: list / clear the loop's open clarifying questions. Read/edit of state.json
+# only — no Telegram API, no secrets, and it never advances the offset. Forwards to
+# telegram.py's `questions` subcommand with the resolved state dir.
+if [ "$ACTION" = "questions" ]; then
+  launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 \
+    || { echo "NOT INSTALLED: $LABEL (set TICKET_LOOP_LABEL if yours differs)" >&2; exit 1; }
+  resolve_state_dir
+  TG="/opt/dev-workflow/bin/telegram.py"   # baked (hardened /opt) copy, else this clone's
+  [ -f "$TG" ] || TG="$SCRIPT_DIR/telegram.py"
+  TICKET_LOOP_STATE_DIR="$SD" python3 "$TG" questions ${QARGS[@]+"${QARGS[@]}"}
+  exit $?
+fi
 
 # run-now: trigger one pass of the INSTALLED job immediately.
 #   default  — only when no pass is currently running (refuses otherwise);
@@ -106,18 +140,10 @@ if [ "$ACTION" = "status" ]; then
   launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 \
     || { echo "NOT INSTALLED: $LABEL (set TICKET_LOOP_LABEL if yours differs)" >&2; exit 1; }
   PID="$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3}')"
-  WT="$(plutil -extract EnvironmentVariables.DW_WORK_TREE raw "$PLIST" 2>/dev/null || true)"
+  # state dir + work tree: env from plist, else config, else default (shared helper).
+  resolve_state_dir
   echo "job        : $LABEL — $([ -n "$PID" ] && echo "PASS RUNNING (pid $PID)" || echo "idle (loaded)")"
   echo "work tree  : ${WT:-unknown} @ $(git -C "${WT:-/nonexistent}" log --oneline -1 2>/dev/null || echo '?')"
-  # state dir: env from plist, else config, else default — mirror the runner's logic.
-  SD="$(plutil -extract EnvironmentVariables.TICKET_LOOP_STATE_DIR raw "$PLIST" 2>/dev/null || true)"
-  if [ -z "$SD" ] && [ -n "$WT" ] && [ -f "$WT/dev-workflow.yml" ]; then
-    SD="$(cd "$WT" 2>/dev/null && { command -v uv >/dev/null 2>&1 \
-      && uv run --quiet --no-project "$FW_ROOT/dev-workflow/dw-config.py" dev-workflow.yml runtime.state_dir .agent-loop 2>/dev/null \
-      || echo .agent-loop; })"
-  fi
-  SD="${SD:-.agent-loop}"
-  case "$SD" in /*) : ;; *) SD="$WT/$SD" ;; esac
   if [ -f "$SD/state.json" ]; then
     python3 - "$SD/state.json" <<'PYEOF'
 import json, sys, datetime
@@ -127,7 +153,7 @@ dig = s.get("last_digest", "never")
 print(f"digest     : {'SENT today' if dig == today else 'not yet today (last: ' + str(dig) + ')'}")
 print(f"scout      : last {s.get('last_scout', 'never')}")
 print(f"idle flag  : {'pinged (in a dry spell)' if s.get('idle_pinged') else 'clear (worked recently / not yet idle)'}")
-print(f"open Qs    : {len(s.get('questions', {}) or {})} awaiting answers")
+print(f"open Qs    : {len(s.get('questions', {}) or {})} awaiting answers (dw-loop questions to list)")
 PYEOF
   else
     echo "state      : no state.json at $SD (no pass has run from this work tree yet?)"

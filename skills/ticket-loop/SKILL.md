@@ -252,6 +252,41 @@ later, when you send the completion message, instead of sitting unread until the
 next scheduled wake. Cheap (`poll --timeout 0`), and it keeps the group feeling
 like a live conversation rather than a batch job.
 
+#### Clearing stale questions (prune + release the hold)
+
+Step 1 clears the **blocked** hold when an *answer arrives*. This handles the other
+end: a question that will **never** be answered (the ticket was closed out-of-band,
+or a human decides nobody will reply). The routing entries live in `state.json`
+(`questions`, keyed by Telegram `message_id`); the CLI edits them as pure state — it
+**never** sends and **never** advances the Telegram offset.
+
+- **Prune (agent-driven — needs the tracker).** Run `dw-telegram questions --json`
+  for the open-question entries (`message_id`, `ticket`, `text`, `asked_at`). For
+  each, `get_ticket` the ticket and collect those whose state is **done** or
+  canceled — these are dead questions. **Present the go-list before applying**
+  (ticket, age, first line of the question, tracker state), and on confirmation
+  `dw-telegram questions --clear <message_id>` each one, then `unlabel` the
+  **blocked** role if that ticket still carries the label. (A done/canceled ticket
+  won't be reworked, so the label drop there is tidiness, not a requeue.)
+
+- **Hold-release as next-pass reconciliation.** During a normal pass, a
+  **blocked**-labeled ticket with **no** outstanding question entry in `state.json`
+  means the answer is no longer pending: `unlabel` the **blocked** role and
+  re-evaluate the ticket as normal actionable work (steps 3–5). This is what makes a
+  human's bare `dw-loop questions --clear ABC-1` — a pure state edit, no Telegram
+  round-trip — actually *unblock* the ticket the next pass. It **mirrors the
+  Dependency gate's `dep_blocked` reconciliation** (step 3: `unlabel` `dep_blocked`
+  once every blocker is **done**), and the two stay strictly distinct: **blocked**
+  is a human answer (cleared by a reply or by a missing question entry);
+  **dep_blocked** is another ticket finishing (cleared only when its blockers reach
+  **done**). Never conflate them, never Telegram-unblock a `dep_blocked` ticket, and
+  keep them in their own digest sections (`⏳ Blocked on answers` vs `🔗 Blocked on
+  dependencies` — the shared digest contract).
+
+- **Non-goal — never answer from the CLI.** `--clear`/`--prune` only remove local
+  routing state; they post nothing. Replies stay in Telegram so the ticket's
+  question/answer audit trail (the `📩 Answer via Telegram` mirror) is unchanged.
+
 ### 2. Babysit agent PRs — the back half of the job
 
 A PR is not "done" when it opens; it's done when it merges. Before taking new
