@@ -400,5 +400,175 @@ class TestPickNext(unittest.TestCase):
             self.assertTrue(d["consume_run_now"])          # still consume the file
 
 
+class TestClassify(unittest.TestCase):
+    OK = {"picked": 0, "pr_opened": 0, "asked": 0, "blocked": 0,
+          "progressed": False, "error": None}
+
+    def c(self, **kw):
+        base = dict(rc=0, timed_out=False, outcome=dict(self.OK),
+                    log_tail=[], questions_count=0)
+        base.update(kw)
+        return orch.classify_pass(**base)[0]
+
+    def test_timeout_and_nonzero_are_error(self):
+        self.assertEqual(self.c(timed_out=True), "error")
+        self.assertEqual(self.c(rc=7), "error")
+
+    def test_guillotine_warn_is_error(self):
+        tail = ["[ts] WARN: pass terminated background task(s) at the -p ceiling — "
+                "a build was likely killed mid-flight ... Background tasks still running"]
+        self.assertEqual(self.c(log_tail=tail), "error")
+
+    def test_outcome_error_field_is_error(self):
+        o = dict(self.OK); o["error"] = "tracker MCP down"
+        self.assertEqual(self.c(outcome=o), "error")
+
+    def test_pr_opened_or_progressed_is_productive(self):
+        o = dict(self.OK); o["pr_opened"] = 1
+        self.assertEqual(self.c(outcome=o), "productive")
+        o = dict(self.OK); o["progressed"] = True
+        self.assertEqual(self.c(outcome=o), "productive")
+
+    def test_asked_blocked_or_open_questions_is_waiting(self):
+        o = dict(self.OK); o["asked"] = 1
+        self.assertEqual(self.c(outcome=o), "waiting")
+        o = dict(self.OK); o["blocked"] = 1
+        self.assertEqual(self.c(outcome=o), "waiting")
+        self.assertEqual(self.c(questions_count=2), "waiting")
+
+    def test_nothing_is_dry(self):
+        self.assertEqual(self.c(), "dry")
+
+    def test_missing_outcome_lock_yield_is_skipped_lock(self):
+        tail = ["[2026-07-11 12:00:00 UTC] skip: held by interactive pid 4242"]
+        self.assertEqual(self.c(outcome=None, log_tail=tail), "skipped-lock")
+
+    def test_missing_outcome_otherwise_dry(self):
+        self.assertEqual(self.c(outcome=None), "dry")
+
+
+class TestApplyOutcome(unittest.TestCase):
+    def cfg(self):
+        cfg = dict(orch.DEFAULTS)
+        cfg["ladder_s"] = [600, 1200, 2400, 3600]
+        for k in ("interval", "waiting_interval", "force_full_every",
+                  "pass_timeout", "requeue_delay", "crash_park_for"):
+            cfg[k + "_s"] = orch.parse_duration(cfg[k])
+        for k in ("mem_floor_mb", "error_escalate_after", "crash_park_after"):
+            cfg[k] = int(cfg[k])
+        return cfg
+
+    def test_productive_resets_everything_to_fast(self):
+        ps = orch.default_pstate()
+        ps.update(dry_streak=3, error_streak=2, crash_streak=1)
+        delay, esc = orch.apply_outcome(ps, "productive", self.cfg(), NOW)
+        self.assertEqual(delay, 600)
+        self.assertEqual((ps["dry_streak"], ps["error_streak"], ps["crash_streak"]),
+                         (0, 0, 0))
+        self.assertEqual(ps["next_eligible"], orch.to_iso(
+            NOW + datetime.timedelta(seconds=600)))
+        self.assertEqual(ps["last_outcome"], "productive")
+        self.assertEqual(ps["last_full_pass"], orch.to_iso(NOW))
+        self.assertEqual(esc, [])
+
+    def test_dry_ladder_advances_and_caps(self):
+        ps = orch.default_pstate()
+        cfg = self.cfg()
+        delays = [orch.apply_outcome(ps, "dry", cfg, NOW)[0] for _ in range(5)]
+        self.assertEqual(delays, [1200, 2400, 3600, 3600, 3600])
+
+    def test_precheck_idle_advances_ladder_but_no_full_pass(self):
+        ps = orch.default_pstate()
+        delay, _ = orch.apply_outcome(ps, "precheck-idle", self.cfg(), NOW)
+        self.assertEqual(delay, 1200)
+        self.assertIsNone(ps["last_full_pass"])   # no pass actually ran
+
+    def test_waiting_is_fixed_interval_not_ladder(self):
+        ps = orch.default_pstate()
+        ps["dry_streak"] = 3
+        delay, _ = orch.apply_outcome(ps, "waiting", self.cfg(), NOW)
+        self.assertEqual(delay, 1200)              # waiting_interval 20m
+        self.assertEqual(ps["dry_streak"], 3)      # ladder untouched
+
+    def test_error_streak_escalates_at_threshold(self):
+        ps = orch.default_pstate()
+        cfg = self.cfg()
+        _, e1 = orch.apply_outcome(ps, "error", cfg, NOW)
+        _, e2 = orch.apply_outcome(ps, "error", cfg, NOW)
+        self.assertEqual(e1, []); self.assertEqual(e2, [])
+        _, e3 = orch.apply_outcome(ps, "error", cfg, NOW)
+        self.assertEqual(ps["error_streak"], 3)
+        self.assertTrue(any(level == "project" for level, _ in e3))
+        self.assertTrue(any(level == "ops" for level, _ in e3))
+        # 4th error: streak keeps counting but no repeat spam at the threshold
+        _, e4 = orch.apply_outcome(ps, "error", cfg, NOW)
+        self.assertEqual(e4, [])
+
+    def test_crash_parks_after_k(self):
+        ps = orch.default_pstate()
+        cfg = self.cfg()
+        orch.apply_outcome(ps, "crash", cfg, NOW)
+        orch.apply_outcome(ps, "crash", cfg, NOW)
+        self.assertIsNone(ps["parked_until"])
+        _, esc = orch.apply_outcome(ps, "crash", cfg, NOW)
+        self.assertEqual(ps["crash_streak"], 3)
+        self.assertEqual(ps["parked_until"], orch.to_iso(
+            NOW + datetime.timedelta(hours=12)))
+        self.assertTrue(any(level == "ops" for level, _ in esc))
+
+    def test_skipped_lock_short_requeue_no_streaks(self):
+        ps = orch.default_pstate()
+        ps["dry_streak"] = 2
+        delay, esc = orch.apply_outcome(ps, "skipped-lock", self.cfg(), NOW)
+        self.assertEqual(delay, 300)               # requeue_delay 5m
+        self.assertEqual(ps["dry_streak"], 2)
+        self.assertEqual(esc, [])
+
+    def test_fixed_cadence_uses_interval_for_real_passes(self):
+        ps = orch.default_pstate()
+        for cls in ("productive", "dry", "waiting"):
+            delay, _ = orch.apply_outcome(ps, cls, self.cfg(), NOW,
+                                          cadence="fixed", interval_s=2700)
+            self.assertEqual(delay, 2700, cls)
+
+
+class TestCmdRecord(unittest.TestCase):
+    """record end-to-end against scratch roster + state files."""
+
+    def run_record(self, tmp, outcome, project="alpha"):
+        roster_path = make_roster_dir(tmp)
+        state_path = Path(tmp) / "orch-state.json"
+        rc = orch.main(["record", "--roster", str(roster_path),
+                        "--state", str(state_path), "--project", project,
+                        "--outcome", outcome, "--now", "2026-07-11T12:00:00Z"])
+        return rc, json.loads(state_path.read_text())
+
+    def test_record_persists_and_advances_rr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, st = self.run_record(tmp, "productive")
+        self.assertEqual(rc, 0)
+        ps = st["projects"]["alpha"]
+        self.assertEqual(ps["last_outcome"], "productive")
+        self.assertEqual(st["rr_next"], 1 % 1)   # single project → wraps to 0
+        self.assertNotIn("pass_started", st)
+
+    def test_record_clears_write_ahead(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roster_path = make_roster_dir(tmp)
+            state_path = Path(tmp) / "orch-state.json"
+            st = {"pass_started": {"project": "alpha", "ts": "2026-07-11T11:00:00Z"}}
+            orch.save_state(state_path, st)
+            orch.main(["record", "--roster", str(roster_path),
+                       "--state", str(state_path), "--project", "alpha",
+                       "--outcome", "dry", "--now", "2026-07-11T12:00:00Z"])
+            st = json.loads(state_path.read_text())
+        self.assertNotIn("pass_started", st)
+
+    def test_unknown_outcome_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit):
+                self.run_record(tmp, "meh")
+
+
 if __name__ == "__main__":
     unittest.main()

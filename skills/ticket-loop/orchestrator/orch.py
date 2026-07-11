@@ -386,6 +386,158 @@ def cmd_next(args):
     return 0
 
 
+# ── outcome classification (spec §4 — four classes, never silently dry) ──────
+
+OUTCOME_CLASSES = ("productive", "dry", "precheck-idle", "waiting",
+                   "error", "crash", "skipped-lock")
+
+
+def classify_pass(rc, timed_out, outcome, log_tail, questions_count):
+    """Classify one finished pass. `outcome` is the skill-emitted outcome.json
+    dict (None when the pass never wrote one — cron-run.sh deletes the stale
+    file pre-pass, so a present file is always THIS pass's line)."""
+    if timed_out:
+        return "error", "pass hit the orchestrator timeout"
+    if rc != 0:
+        return "error", f"pass exited {rc}"
+    if any("Background tasks still running" in line for line in log_tail):
+        return "error", "background-guillotine WARN (a build was likely killed)"
+    if outcome is None:
+        if any("skip:" in line for line in log_tail[-3:]):
+            # cron-run.sh yielded the singleton lock — actively worked, not dry
+            return "skipped-lock", "runner yielded the singleton lock"
+        return "dry", "no outcome.json written (counting as dry)"
+    if outcome.get("error"):
+        return "error", f"pass reported: {outcome['error']}"
+    if outcome.get("pr_opened", 0) > 0 or outcome.get("progressed"):
+        return "productive", "PR opened / ticket advanced"
+    if outcome.get("asked", 0) > 0 or outcome.get("blocked", 0) > 0:
+        return "waiting", "question asked / ticket blocked on a human"
+    if questions_count > 0:
+        return "waiting", f"{questions_count} question(s) still open"
+    return "dry", "ran, nothing to do"
+
+
+def cmd_classify(args):
+    sd = Path(args.state_dir)
+    outcome = None
+    f = sd / "outcome.json"
+    if f.exists():
+        try:
+            outcome = json.loads(f.read_text())
+        except json.JSONDecodeError:
+            outcome = None
+    tail = []
+    log = sd / "logs" / "ticket-loop-cron.log"
+    if log.exists():
+        tail = log.read_text().splitlines()[-15:]
+    questions = 0
+    state_json = sd / "state.json"
+    if state_json.exists():
+        try:
+            questions = len(json.loads(state_json.read_text()).get("questions") or {})
+        except json.JSONDecodeError:
+            pass
+    cls, reason = classify_pass(args.rc, args.timed_out, outcome, tail, questions)
+    print(f"{cls} {reason}")
+    return 0
+
+
+# ── backoff transitions (spec §4 + supervision §2/§3) ─────────────────────────
+
+def apply_outcome(ps, cls, cfg, now, cadence="adaptive", interval_s=None):
+    """Mutate one project's backoff state for a classified outcome; return
+    (delay_seconds, [(level, message)]). Ladder indexes by streak so
+    productive→10m, 1st dry→20m, 2nd→40m, then the 60m cap."""
+    if cls not in OUTCOME_CLASSES:
+        raise ValueError(f"unknown outcome class: {cls}")
+    ladder = cfg["ladder_s"]
+    esc = []
+
+    def rung(streak):
+        return ladder[min(streak, len(ladder) - 1)]
+
+    real_pass = cls in ("productive", "dry", "waiting", "error")
+    if cls == "productive":
+        ps["dry_streak"] = ps["error_streak"] = ps["crash_streak"] = 0
+        delay = ladder[0]
+    elif cls in ("dry", "precheck-idle"):
+        ps["dry_streak"] += 1
+        ps["error_streak"] = 0
+        delay = rung(ps["dry_streak"])
+    elif cls == "waiting":
+        # Neither the ladder nor "productive": polling faster doesn't make
+        # humans answer faster, and an ignored question must not pin fast cadence.
+        ps["error_streak"] = 0
+        delay = cfg["waiting_interval_s"]
+    elif cls == "error":
+        ps["error_streak"] += 1
+        delay = rung(ps["error_streak"])
+        if ps["error_streak"] == cfg["error_escalate_after"]:
+            msg = (f"⚠️ ticket-loop: {ps['error_streak']} consecutive failed "
+                   f"passes — check the loop log")
+            esc.append(("project", msg))
+            esc.append(("ops", msg))
+    elif cls == "crash":
+        ps["crash_streak"] += 1
+        ps["error_streak"] += 1
+        delay = rung(ps["crash_streak"])
+        if ps["crash_streak"] >= cfg["crash_park_after"]:
+            ps["parked_until"] = to_iso(
+                now + datetime.timedelta(seconds=cfg["crash_park_for_s"]))
+            esc.append(("ops", f"🚨 parked after {ps['crash_streak']} consecutive "
+                               f"crashes (until {ps['parked_until']}) — investigate "
+                               "before it rejoins the roster"))
+    else:  # skipped-lock — an interactive session is working the project
+        delay = cfg["requeue_delay_s"]
+    if cadence == "fixed" and real_pass and interval_s:
+        delay = interval_s
+    ps["next_eligible"] = to_iso(now + datetime.timedelta(seconds=delay))
+    ps["last_outcome"] = cls
+    if real_pass:
+        ps["last_pass"] = to_iso(now)
+        ps["last_full_pass"] = to_iso(now)
+    return delay, esc
+
+
+def cmd_record(args):
+    roster = load_roster(args.roster)
+    st = load_state(args.state)
+    ensure_projects(st, roster["projects"])
+    now = from_iso(args.now) if args.now else now_utc()
+    names = [p["name"] for p in roster["projects"]]
+    if args.project not in names:
+        sys.exit(f"error: unknown project {args.project!r}")
+    if args.outcome not in OUTCOME_CLASSES:
+        sys.exit(f"error: unknown outcome {args.outcome!r} "
+                 f"(one of {', '.join(OUTCOME_CLASSES)})")
+    proj = next(p for p in roster["projects"] if p["name"] == args.project)
+    ps = st["projects"][args.project]
+    _delay, esc = apply_outcome(ps, args.outcome, roster["cfg"], now,
+                                cadence=proj["cadence"],
+                                interval_s=proj["interval_s"])
+    st.pop("pass_started", None)                       # write-ahead consumed
+    st["rr_next"] = (names.index(args.project) + 1) % len(names)
+    # Shared-failure heuristic (supervision §2): one ~/.claude for all projects,
+    # so an expired OAuth token errors everyone at once — say so loudly, once.
+    all_err = (len(names) > 1 and
+               all(st["projects"][n]["error_streak"] >= 1 for n in names))
+    if all_err and args.outcome in ("error", "crash") and not st.get("all_error_alerted"):
+        st["all_error_alerted"] = True
+        esc.append(("ops", "🚨 EVERY roster project is erroring — shared-auth "
+                           "failure likely (expired CLAUDE_CODE_OAUTH_TOKEN in "
+                           "the shared ~/.claude?)"))
+    if not all_err:
+        st["all_error_alerted"] = False
+    save_state(args.state, st)
+    emit(args, {
+        "NEXT_ELIGIBLE": ps["next_eligible"],
+        "ESCALATE_PROJECT": "; ".join(m for lvl, m in esc if lvl == "project"),
+        "ESCALATE_OPS": "; ".join(m for lvl, m in esc if lvl == "ops"),
+    })
+    return 0
+
+
 # ── CLI (subcommands are added in later tasks) ────────────────────────────────
 
 def emit(args, pairs):
@@ -416,6 +568,18 @@ def main(argv=None):
                         help="project name from the run-now trigger file "
                              "('' = first roster project)")
     p_next.set_defaults(func=cmd_next)
+
+    p_cls = sub.add_parser("classify", help="classify a finished pass")
+    p_cls.add_argument("--state-dir", required=True)
+    p_cls.add_argument("--rc", type=int, required=True)
+    p_cls.add_argument("--timed-out", action="store_true")
+    p_cls.set_defaults(func=cmd_classify)
+
+    p_rec = sub.add_parser("record", help="apply a pass outcome to backoff state")
+    common(p_rec)
+    p_rec.add_argument("--project", required=True)
+    p_rec.add_argument("--outcome", required=True)
+    p_rec.set_defaults(func=cmd_record)
 
     args = parser.parse_args(argv)
     return args.func(args)
