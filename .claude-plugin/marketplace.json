@@ -1,0 +1,15 @@
+{
+  "name": "dev-workflow",
+  "owner": {
+    "name": "HCode Technologies"
+  },
+  "plugins": [
+    {
+      "name": "dev-workflow",
+      "description": "HCode dev-workflow: standup/cleanup/release/blog session skills + the ticket-loop autonomous agent, configured per-repo by dev-workflow.yml",
+      "source": "./",
+      "repository": "singlas/dev-workflow",
+      "path": "."
+    }
+  ]
+}
