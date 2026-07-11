@@ -59,13 +59,14 @@ while [ $# -gt 0 ]; do
     --uninstall|uninstall) ACTION=uninstall ;;
     --refresh|refresh)     ACTION=refresh ;;
     run-now|--run-now)     ACTION=run-now ;;
+    status|--status)       ACTION=status ;;
     --force)     FORCE=1 ;;
     --work-tree) shift; WORK_TREE="${1:-}"; [ -n "$WORK_TREE" ] || { echo "ERROR: --work-tree needs a path" >&2; exit 2; } ;;
     --env-file)  shift; ENV_FILE="${1:-}";  [ -n "$ENV_FILE" ]  || { echo "ERROR: --env-file needs a path"  >&2; exit 2; } ;;
     --opt)       USE_OPT=1 ;;
     --mcp-keyed) MCP_KEYED=1 ;;
     install|"")  : ;;
-    *) echo "usage: install-cron.sh [--work-tree <path>] [--env-file <path>] [--opt] [--mcp-keyed] [--refresh|--uninstall] | run-now [--force]" >&2; exit 2 ;;
+    *) echo "usage: install-cron.sh [--work-tree <path>] [--env-file <path>] [--opt] [--mcp-keyed] [--refresh|--uninstall] | run-now [--force] | status" >&2; exit 2 ;;
   esac
   shift
 done
@@ -77,7 +78,7 @@ done
 if [ "$ACTION" = "run-now" ]; then
   launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 \
     || { echo "ERROR: $LABEL is not installed (set TICKET_LOOP_LABEL if yours differs)" >&2; exit 1; }
-  running_pid() { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^\s*pid = /{print $3}'; }
+  running_pid() { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3}'; }
   PID="$(running_pid)"
   if [ -n "$PID" ]; then
     if [ "$FORCE" != "1" ]; then
@@ -98,6 +99,52 @@ if [ "$ACTION" = "run-now" ]; then
   launchctl kickstart "$DOMAIN/$LABEL" \
     && echo "Kicked one pass of $LABEL (watch the loop's cron log for the start line)."
   exit $?
+fi
+
+# status: is the loop alive, and what has it done today? Read-only.
+if [ "$ACTION" = "status" ]; then
+  launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 \
+    || { echo "NOT INSTALLED: $LABEL (set TICKET_LOOP_LABEL if yours differs)" >&2; exit 1; }
+  PID="$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3}')"
+  WT="$(plutil -extract EnvironmentVariables.DW_WORK_TREE raw "$PLIST" 2>/dev/null || true)"
+  echo "job        : $LABEL — $([ -n "$PID" ] && echo "PASS RUNNING (pid $PID)" || echo "idle (loaded)")"
+  echo "work tree  : ${WT:-unknown} @ $(git -C "${WT:-/nonexistent}" log --oneline -1 2>/dev/null || echo '?')"
+  # state dir: env from plist, else config, else default — mirror the runner's logic.
+  SD="$(plutil -extract EnvironmentVariables.TICKET_LOOP_STATE_DIR raw "$PLIST" 2>/dev/null || true)"
+  if [ -z "$SD" ] && [ -n "$WT" ] && [ -f "$WT/dev-workflow.yml" ]; then
+    SD="$(cd "$WT" 2>/dev/null && { command -v uv >/dev/null 2>&1 \
+      && uv run --quiet --no-project "$FW_ROOT/dev-workflow/dw-config.py" dev-workflow.yml runtime.state_dir .agent-loop 2>/dev/null \
+      || echo .agent-loop; })"
+  fi
+  SD="${SD:-.agent-loop}"
+  case "$SD" in /*) : ;; *) SD="$WT/$SD" ;; esac
+  if [ -f "$SD/state.json" ]; then
+    python3 - "$SD/state.json" <<'PYEOF'
+import json, sys, datetime
+s = json.load(open(sys.argv[1]))
+today = datetime.date.today().isoformat()
+dig = s.get("last_digest", "never")
+print(f"digest     : {'SENT today' if dig == today else 'not yet today (last: ' + str(dig) + ')'}")
+print(f"scout      : last {s.get('last_scout', 'never')}")
+print(f"idle flag  : {'pinged (in a dry spell)' if s.get('idle_pinged') else 'clear (worked recently / not yet idle)'}")
+print(f"open Qs    : {len(s.get('questions', {}) or {})} awaiting answers")
+PYEOF
+  else
+    echo "state      : no state.json at $SD (no pass has run from this work tree yet?)"
+  fi
+  LOCKPID="$(cat "$SD/loop.lock/pid" 2>/dev/null || true)"
+  echo "lock       : $([ -n "$LOCKPID" ] && echo "held by pid $LOCKPID" || echo free)"
+  LOG="$SD/logs/ticket-loop-cron.log"
+  if [ -f "$LOG" ]; then
+    TODAY_RE="$(date '+%Y-%m-%d')"
+    echo "today      : $(grep -c "^\[$TODAY_RE.*— start" "$LOG" 2>/dev/null) passes started, $(grep -c "^\[$TODAY_RE.*— done" "$LOG" 2>/dev/null) completed, $(grep -c "^\[$TODAY_RE.*skip:" "$LOG" 2>/dev/null) skipped (lock)"
+    echo "log tail   : ($LOG)"
+    tail -3 "$LOG" | sed 's/^/  /'
+  else
+    echo "log        : none yet at $LOG"
+  fi
+  echo "next tick  : every :00/:30, 09:00–20:00 (schedule.window) — now $(date '+%H:%M %Z')"
+  exit 0
 fi
 
 # Default secrets location: <framework clone>/.local/agent.env (gitignored). Used only
