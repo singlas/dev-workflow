@@ -538,6 +538,79 @@ def cmd_record(args):
     return 0
 
 
+# ── startup / write-ahead / status (supervision §3, §5, §8) ───────────────────
+
+def cmd_startup(args):
+    try:
+        roster = load_roster(args.roster)
+        for p in roster["projects"]:
+            check_work_tree(p, roster["root"])
+    except RosterError as exc:
+        sys.exit(f"FATAL: {exc}")
+    now = from_iso(args.now) if args.now else now_utc()
+    st = load_state(args.state)
+    ensure_projects(st, roster["projects"])
+    esc = []
+    crash = ""
+    pa = st.pop("pass_started", None)
+    if pa and pa.get("project") in st["projects"]:
+        # The container died mid-pass: count a crash for that project so an
+        # OOM-on-A → restart → re-pick-A loop can't starve the rest (blocker §3).
+        crash = pa["project"]
+        _d, esc = apply_outcome(st["projects"][crash], "crash",
+                                roster["cfg"], now)
+    cleared = []
+    for p in roster["projects"]:
+        lock = Path(p["state_dir"]) / "loop.lock"
+        if lock.exists():
+            # PID namespaces reset on container restart, so a stale pid can
+            # false-match a live process and silently skip every pass (§5).
+            shutil.rmtree(lock, ignore_errors=True)
+            cleared.append(str(lock))
+        wins, tz = windows_for(p)
+        if wins and seconds_until_open(wins, tz, now) is None:
+            print(f"WARN: {p['name']}: roster window ∩ repo schedule.window is "
+                  "empty — this project will never run", file=sys.stderr)
+    save_state(args.state, st)
+    emit(args, {"PROJECTS": " ".join(p["name"] for p in roster["projects"]),
+                "CRASH_RECOVERED": crash,
+                "LOCKS_CLEARED": " ".join(cleared),
+                "ESCALATE_OPS": "; ".join(m for lvl, m in esc if lvl == "ops")})
+    return 0
+
+
+def cmd_pass_start(args):
+    roster = load_roster(args.roster)
+    st = load_state(args.state)
+    ensure_projects(st, roster["projects"])
+    now = from_iso(args.now) if args.now else now_utc()
+    st["pass_started"] = {"project": args.project, "ts": to_iso(now)}
+    save_state(args.state, st)
+    return 0
+
+
+def cmd_status(args):
+    roster = load_roster(args.roster)
+    st = load_state(args.state)
+    ensure_projects(st, roster["projects"])
+    now = now_utc()
+    pa = st.get("pass_started")
+    print(f"orchestrator: {len(roster['projects'])} project(s), "
+          f"{'PASS RUNNING: ' + pa['project'] + ' since ' + pa['ts'] if pa else 'between passes'}")
+    for p in roster["projects"]:
+        ps = st["projects"][p["name"]]
+        ne = ps.get("next_eligible")
+        due = "now"
+        if ne:
+            secs = int((from_iso(ne) - now).total_seconds())
+            due = f"in {secs // 60}m" if secs > 0 else "now"
+        parked = f"  PARKED until {ps['parked_until']}" if ps.get("parked_until") else ""
+        print(f"  {p['name']:<20} last={ps.get('last_outcome') or '—':<14} "
+              f"next={due:<8} dry={ps['dry_streak']} err={ps['error_streak']} "
+              f"crash={ps['crash_streak']}  cadence={p['cadence']}{parked}")
+    return 0
+
+
 # ── CLI (subcommands are added in later tasks) ────────────────────────────────
 
 def emit(args, pairs):
@@ -580,6 +653,19 @@ def main(argv=None):
     p_rec.add_argument("--project", required=True)
     p_rec.add_argument("--outcome", required=True)
     p_rec.set_defaults(func=cmd_record)
+
+    p_up = sub.add_parser("startup", help="validate roster, recover write-ahead, clear locks")
+    common(p_up)
+    p_up.set_defaults(func=cmd_startup)
+
+    p_ps = sub.add_parser("pass-start", help="persist the crash write-ahead record")
+    common(p_ps)
+    p_ps.add_argument("--project", required=True)
+    p_ps.set_defaults(func=cmd_pass_start)
+
+    p_st = sub.add_parser("status", help="human status table")
+    common(p_st)
+    p_st.set_defaults(func=cmd_status)
 
     args = parser.parse_args(argv)
     return args.func(args)

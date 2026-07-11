@@ -570,5 +570,58 @@ class TestCmdRecord(unittest.TestCase):
                 self.run_record(tmp, "meh")
 
 
+class TestStartup(unittest.TestCase):
+    def test_crash_recovery_and_lock_clear(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roster_path = make_roster_dir(tmp)
+            state_path = Path(tmp) / "orch-state.json"
+            lock = Path(tmp) / "state-alpha" / "loop.lock"
+            lock.mkdir(parents=True)
+            (lock / "pid").write_text("42")
+            orch.save_state(state_path, {
+                "pass_started": {"project": "alpha", "ts": "2026-07-11T11:00:00Z"}})
+            rc = orch.main(["startup", "--roster", str(roster_path),
+                            "--state", str(state_path),
+                            "--now", "2026-07-11T12:00:00Z"])
+            self.assertEqual(rc, 0)
+            self.assertFalse(lock.exists())          # lock-clear on boot
+            st = json.loads(state_path.read_text())
+            self.assertNotIn("pass_started", st)
+            self.assertEqual(st["projects"]["alpha"]["crash_streak"], 1)
+            self.assertEqual(st["projects"]["alpha"]["last_outcome"], "crash")
+
+    def test_guard_failure_is_fatal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roster_path = make_roster_dir(tmp)
+            os.remove(Path(tmp) / "alpha" / ".dw-agent-clone")   # break the guard
+            with self.assertRaises(SystemExit):
+                orch.main(["startup", "--roster", str(roster_path),
+                           "--state", str(Path(tmp) / "orch-state.json")])
+
+    def test_clean_startup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roster_path = make_roster_dir(tmp)
+            state_path = Path(tmp) / "orch-state.json"
+            rc = orch.main(["startup", "--roster", str(roster_path),
+                            "--state", str(state_path)])
+            self.assertEqual(rc, 0)
+            st = json.loads(state_path.read_text())
+            self.assertIn("alpha", st["projects"])
+
+
+class TestPassStart(unittest.TestCase):
+    def test_write_ahead_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roster_path = make_roster_dir(tmp)
+            state_path = Path(tmp) / "orch-state.json"
+            rc = orch.main(["pass-start", "--roster", str(roster_path),
+                            "--state", str(state_path), "--project", "alpha",
+                            "--now", "2026-07-11T12:00:00Z"])
+            self.assertEqual(rc, 0)
+            st = json.loads(state_path.read_text())
+            self.assertEqual(st["pass_started"],
+                             {"project": "alpha", "ts": "2026-07-11T12:00:00Z"})
+
+
 if __name__ == "__main__":
     unittest.main()
