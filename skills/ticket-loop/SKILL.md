@@ -19,8 +19,8 @@ description: >-
 
 You are the **orchestrator**. You never edit code in this worktree — implementation
 happens in subagents with isolated worktrees. The tracker is the state store; the
-only local state is `state.json` in the loop's state dir (the Telegram offset + the
-`last_digest`/`last_scout`/`last_idle_ping` dates).
+only local state is `state.json` in the loop's state dir (the Telegram offset, the
+`last_digest`/`last_scout` dates, and the `idle_pinged` streak flag).
 
 ## Per-repo configuration (`dev-workflow.yml`)
 
@@ -426,20 +426,21 @@ actionable ticket, go to step 3 instead of sleeping.
   I could take: ABC-<a> <title> · ABC-<b> <title>. Reply 'take ABC-<n>' to approve.`
   Update `last_scout` after asking. The label is applied only on a human's approval
   reply, never by scouting itself.
-- Then idle → **one idle ping per day, then silent.** If this pass did nothing at
-  all — no digest sent, no messages drained, no PR babysitting actions, no builds,
-  no scout question — check `last_idle_ping` in `state.json` (date-keyed in
-  `schedule.tz`, exactly like `last_digest`):
-  - `last_idle_ping != today` → send ONE short note so the humans know the loop is
-    alive and the queue is dry — `💤 Idle pass: nothing actionable (queue
-    empty/blocked, no open PRs to babysit). I'll keep checking on schedule.` — and
-    stamp `last_idle_ping = today`.
-  - `last_idle_ping == today` → **end silently.** Repeat idle pings are noise; the
-    daily digest already reports the queue each morning.
-  A pass that did anything (even just draining one answer) is NOT idle — skip the
-  ping logic entirely and don't stamp. Under /loop, `ScheduleWakeup` 20–30 min (a
-  blocked ticket's answer is drained on the next wake at step 1); otherwise end the
-  pass with a summary of what this run did.
+- Then idle → **one idle ping per idle STREAK, then silent.** Keyed by a boolean
+  `idle_pinged` in `state.json` — not a date, so a fresh dry spell after real work
+  gets its own (single) notice:
+  - This pass did **nothing at all** (no digest sent, no messages drained, no PR
+    babysitting actions, no builds, no scout question):
+    - `idle_pinged` is not `true` → send ONE short note — `💤 Idle pass: nothing
+      actionable (queue empty/blocked, no open PRs to babysit). I'll keep checking
+      on schedule.` — and set `idle_pinged: true`.
+    - `idle_pinged == true` → **end silently.** Repeat idle pings are noise; the
+      daily digest already reports the queue each morning.
+  - This pass did **anything** (even just draining one answer) → set
+    `idle_pinged: false` before ending, so the next dry spell announces itself once.
+  Under /loop, `ScheduleWakeup` 20–30 min (a blocked ticket's answer is drained on
+  the next wake at step 1); otherwise end the pass with a summary of what this run
+  did.
 
 ## Daily digest — the agent reports in
 
