@@ -54,7 +54,7 @@ the orchestrator):
 Volume layout (one mounted volume holds everything writable):
 
     /home/agent/
-      roster.yml            # the roster (start from ../roster.example.yml)
+      roster.yml            # the roster (start from `roster.example.yml`, next to this README)
       orch/                 # orchestrator state: orch-state.json, run-now
       <project>/            # dedicated base-branch clone + .dw-agent-clone marker
       <project>.env         # 600 — LINEAR_API_KEY, GH_TOKEN (fine-grained,
@@ -100,7 +100,7 @@ The loop is tracker-driven; a project can't be round-robined until it has:
    `tracker.roles`, and at least one eligible ticket.
 3. A Telegram group + a **dedicated** bot (own token + chat id — never share a
    bot across projects: getUpdates offsets contend).
-4. An `agent.env` (600) with `LINEAR_API_KEY`, a **fine-grained per-repo**
+4. A per-project env file (600, e.g. `<project>.env`) with `LINEAR_API_KEY`, a **fine-grained per-repo**
    `GH_TOKEN`, and the Telegram creds. One PAT across orgs is a prompt-injection
    blast-radius mistake — a malicious ticket on project A must not be able to
    push to project B's org. (Residual risk in the one-container shape: passes
