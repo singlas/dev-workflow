@@ -220,6 +220,172 @@ def mem_available_mb(path="/proc/meminfo"):
     return None
 
 
+# ── schedule windows (supervision §9: roster ∩ repo, tighten-only) ────────────
+
+_WIN_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$")
+
+
+def parse_window(s):
+    m = _WIN_RE.match(str(s))
+    if not m:
+        raise RosterError(f"bad window: {s!r} (want HH:MM-HH:MM)")
+    h1, m1, h2, m2 = (int(g) for g in m.groups())
+    if h1 > 23 or h2 > 23 or m1 > 59 or m2 > 59:
+        raise RosterError(f"bad window: {s!r} (hours 0-23, minutes 0-59)")
+    return (h1 * 60 + m1, h2 * 60 + m2)
+
+
+def minute_in_window(t, w):
+    a, b = w
+    if a == b:            # degenerate — treat as always open
+        return True
+    if a < b:
+        return a <= t < b
+    return t >= a or t < b  # overnight wrap, e.g. 22:00-06:00
+
+
+def read_repo_schedule(work_tree):
+    """The repo's own schedule gate: dev-workflow.yml schedule.{window,tz}.
+    Missing file / unparseable → {} (no repo gate)."""
+    f = Path(work_tree) / "dev-workflow.yml"
+    if not f.exists() or yaml is None:
+        return {}
+    try:
+        data = yaml.safe_load(f.read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    sched = data.get("schedule") or {}
+    out = {}
+    if sched.get("window"):
+        out["window"] = sched["window"]
+    if sched.get("tz"):
+        out["tz"] = sched["tz"]
+    return out
+
+
+def windows_for(project):
+    """All gating windows for a project (roster entry + repo config — a time must
+    be inside BOTH: the intersection, consistent with boundary rule 1), plus the
+    tz they're evaluated in (roster tz beats repo schedule.tz)."""
+    wins = []
+    if project.get("window"):
+        wins.append(parse_window(project["window"]))
+    repo = read_repo_schedule(project["work_tree"])
+    if repo.get("window"):
+        wins.append(parse_window(repo["window"]))
+    return wins, (project.get("tz") or repo.get("tz"))
+
+
+def _local_minute(now, tz_name):
+    if tz_name:
+        from zoneinfo import ZoneInfo
+        loc = now.astimezone(ZoneInfo(tz_name))
+    else:
+        loc = now.astimezone()
+    return loc.hour * 60 + loc.minute
+
+
+def seconds_until_open(wins, tz_name, now):
+    """0 when `now` is inside every window; else seconds until the first minute
+    inside all of them (scanned over 48h); None when the intersection is empty."""
+    if not wins:
+        return 0
+    t0 = _local_minute(now, tz_name)
+    for k in range(0, 2880):
+        t = (t0 + k) % 1440
+        if all(minute_in_window(t, w) for w in wins):
+            return k * 60
+    return None
+
+
+# ── the `next` decision ───────────────────────────────────────────────────────
+
+def _parked(ps, now):
+    pu = ps.get("parked_until")
+    return bool(pu) and now < from_iso(pu)
+
+
+def pick_next(roster, st, now, mem_mb=None, run_now=None):
+    """Choose the next action. Read-only on `st` (record() owns all mutation) —
+    EXCEPT nothing: window skips deliberately do not touch backoff state."""
+    cfg = roster["cfg"]
+    projs = roster["projects"]
+
+    if run_now is not None:
+        target = next((p for p in projs if p["name"] == run_now), None)
+        if target is None and run_now == "":
+            target = projs[0]
+        if target is not None and not _parked(st["projects"][target["name"]], now):
+            return {"action": "run", "project": target, "force_full": True,
+                    "precheck": False, "consume_run_now": True}
+        # unknown/parked name: consume the file (driver deletes it) and fall through
+
+    if mem_mb is not None and mem_mb < cfg["mem_floor_mb"]:
+        # consume_run_now here too: an unknown-name run-now file that fell
+        # through must still be deleted, or the driver busy-loops on it.
+        return {"action": "sleep", "sleep_seconds": cfg["requeue_delay_s"],
+                "reason": f"low memory: {mem_mb} MB available "
+                          f"< {cfg['mem_floor_mb']} MB floor",
+                "consume_run_now": run_now is not None}
+
+    waits = []
+    start = st.get("rr_next", 0) % len(projs)
+    for i in range(len(projs)):
+        p = projs[(start + i) % len(projs)]
+        ps = st["projects"][p["name"]]
+        if _parked(ps, now):
+            waits.append((from_iso(ps["parked_until"]) - now).total_seconds())
+            continue
+        ne = ps.get("next_eligible")
+        if ne and now < from_iso(ne):
+            waits.append((from_iso(ne) - now).total_seconds())
+            continue
+        wins, tz = windows_for(p)
+        wait = seconds_until_open(wins, tz, now)
+        if wait is None:          # empty intersection — startup already warned
+            waits.append(86400)
+            continue
+        if wait > 0:              # outside the window: skip, NO ladder advance
+            waits.append(wait)
+            continue
+        lfp = ps.get("last_full_pass")
+        force_full = (lfp is None or
+                      (now - from_iso(lfp)).total_seconds() >= cfg["force_full_every_s"])
+        precheck = p["cadence"] == "adaptive" and not force_full
+        return {"action": "run", "project": p, "force_full": force_full,
+                "precheck": precheck,
+                "consume_run_now": run_now is not None}
+    sleep_s = int(min(waits)) if waits else 60
+    return {"action": "sleep", "sleep_seconds": max(30, min(sleep_s, 3600)),
+            "reason": "no project eligible",
+            "consume_run_now": run_now is not None}
+
+
+def cmd_next(args):
+    roster = load_roster(args.roster)
+    st = load_state(args.state)
+    ensure_projects(st, roster["projects"])
+    now = from_iso(args.now) if args.now else now_utc()
+    d = pick_next(roster, st, now, mem_mb=mem_available_mb(),
+                  run_now=args.run_now)
+    save_state(args.state, st)   # persists newly-ensured project entries
+    if d["action"] == "sleep":
+        emit(args, {"ACTION": "sleep", "SLEEP_S": d["sleep_seconds"],
+                    "REASON": d["reason"],
+                    "CONSUME_RUN_NOW": 1 if d.get("consume_run_now") else 0})
+        return 0
+    p = d["project"]
+    emit(args, {"ACTION": "run", "PROJECT": p["name"],
+                "WORK_TREE": p["work_tree"], "ENV_FILE": p["env_file"],
+                "STATE_DIR": p["state_dir"], "MODEL": p["model"] or "",
+                "PROJECT_TZ": p["tz"] or "", "CADENCE": p["cadence"],
+                "PRECHECK": 1 if d["precheck"] else 0,
+                "FORCE_FULL": 1 if d["force_full"] else 0,
+                "TIMEOUT_S": roster["cfg"]["pass_timeout_s"],
+                "CONSUME_RUN_NOW": 1 if d.get("consume_run_now") else 0})
+    return 0
+
+
 # ── CLI (subcommands are added in later tasks) ────────────────────────────────
 
 def emit(args, pairs):
@@ -235,7 +401,22 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    # Subcommands are registered here by later tasks.
+
+    def common(p, state=True):
+        p.add_argument("--roster", required=True)
+        if state:
+            p.add_argument("--state", required=True, help="orch-state.json path")
+        p.add_argument("--now", help="ISO timestamp override (tests)")
+        p.add_argument("--sh", action="store_true",
+                       help="print shell-eval-able KEY=VALUE lines")
+
+    p_next = sub.add_parser("next", help="pick the next action")
+    common(p_next)
+    p_next.add_argument("--run-now", default=None,
+                        help="project name from the run-now trigger file "
+                             "('' = first roster project)")
+    p_next.set_defaults(func=cmd_next)
+
     args = parser.parse_args(argv)
     return args.func(args)
 
