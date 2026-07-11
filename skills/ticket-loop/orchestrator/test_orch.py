@@ -447,6 +447,57 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(self.c(outcome=None), "dry")
 
 
+class TestCurrentPassSegment(unittest.TestCase):
+    """Finding 1: classify only from the pass that just finished, so a previous
+    pass's guillotine WARN in the append-only log can't misclassify a clean pass."""
+
+    START = "[2026-07-11 12:00:00 UTC] === ticket-loop — start (HEAD abc123) ==="
+    DONE = "[2026-07-11 12:05:00 UTC] === ticket-loop — done (exit 0) ==="
+    PREV_GUILLOTINE = ("[2026-07-11 11:30:00 UTC] WARN: pass terminated background "
+                       "task(s) ... Background tasks still running")
+    PREV_DONE = "[2026-07-11 11:35:00 UTC] === ticket-loop — done (exit 0) ==="
+
+    def test_returns_lines_from_last_start_marker(self):
+        prev_start = "[2026-07-11 11:00:00 UTC] === ticket-loop — start (HEAD old) ==="
+        lines = [prev_start, self.PREV_DONE, self.START, self.DONE]
+        self.assertEqual(orch.current_pass_segment(lines), [self.START, self.DONE])
+
+    def test_no_start_marker_returns_all_unchanged(self):
+        lines = [self.PREV_GUILLOTINE, self.PREV_DONE, "[ts] skip: held"]
+        self.assertEqual(orch.current_pass_segment(lines), lines)
+
+    def test_previous_guillotine_above_start_does_not_error(self):
+        ok = {"picked": 0, "pr_opened": 0, "asked": 0, "blocked": 0,
+              "progressed": False, "error": None}
+        seg = orch.current_pass_segment(
+            [self.PREV_GUILLOTINE, self.PREV_DONE, self.START, self.DONE])
+        cls, _ = orch.classify_pass(0, False, ok, seg, 0)
+        self.assertEqual(cls, "dry")
+
+    def test_lock_yield_with_prev_guillotine_is_skipped_lock(self):
+        tail = [self.PREV_GUILLOTINE, self.PREV_DONE,
+                "[2026-07-11 12:00:00 UTC] skip: held by interactive pid 4242"]
+        cls, _ = orch.classify_pass(0, False, None, tail, 0)
+        self.assertEqual(cls, "skipped-lock")
+
+    def test_cmd_classify_ignores_previous_pass_guillotine(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            sd = Path(tmp) / "state-alpha"
+            (sd / "logs").mkdir(parents=True)
+            (sd / "logs" / "ticket-loop-cron.log").write_text("\n".join([
+                self.PREV_GUILLOTINE, self.PREV_DONE, self.START, self.DONE]) + "\n")
+            (sd / "outcome.json").write_text(json.dumps(
+                {"picked": 0, "pr_opened": 1, "asked": 0, "blocked": 0,
+                 "progressed": False, "error": None}))
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = orch.main(["classify", "--state-dir", str(sd), "--rc", "0"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(buf.getvalue().startswith("productive"), buf.getvalue())
+
+
 class TestApplyOutcome(unittest.TestCase):
     def cfg(self):
         cfg = dict(orch.DEFAULTS)
@@ -568,6 +619,64 @@ class TestCmdRecord(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(SystemExit):
                 self.run_record(tmp, "meh")
+
+
+class TestSharedAuthEscalation(unittest.TestCase):
+    """Finding 2: the shared ~/.claude means one expired OAuth token errors every
+    project at once — cmd_record escalates loudly, once, when ALL projects error."""
+
+    def make_two_project_roster(self, tmp):
+        root = Path(tmp)
+        entries = []
+        for name in ("alpha", "beta"):
+            wt = root / name
+            wt.mkdir(exist_ok=True)
+            (wt / ".dw-agent-clone").touch()
+            (root / f"{name}.env").touch()
+            entries.append(f"""
+  - name: {name}
+    work_tree: {wt}
+    env_file: {root}/{name}.env
+    state_dir: {root}/state-{name}""")
+        roster = root / "roster.yml"
+        roster.write_text(f"root: {root}\nprojects:{''.join(entries)}\n")
+        return roster
+
+    def record(self, roster_path, state_path, project, outcome):
+        """Run record capturing the JSON stdout; return (state, emitted-dict)."""
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            orch.main(["record", "--roster", str(roster_path),
+                       "--state", str(state_path), "--project", project,
+                       "--outcome", outcome, "--now", "2026-07-11T12:00:00Z"])
+        return json.loads(state_path.read_text()), json.loads(buf.getvalue())
+
+    def test_all_error_latches_once_and_resets(self):
+        MSG = "EVERY roster project is erroring"
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = self.make_two_project_roster(tmp)
+            state = Path(tmp) / "orch-state.json"
+
+            # 1. alpha errors — beta still clean, no shared-auth escalation.
+            st, out = self.record(roster, state, "alpha", "error")
+            self.assertNotIn(MSG, out["ESCALATE_OPS"])
+            self.assertFalse(st.get("all_error_alerted"))
+
+            # 2. beta errors — every project now erroring: escalate + latch.
+            st, out = self.record(roster, state, "beta", "error")
+            self.assertIn(MSG, out["ESCALATE_OPS"])
+            self.assertTrue(st["all_error_alerted"])
+
+            # 3. alpha errors again — latch holds, no repeat of the shared message.
+            st, out = self.record(roster, state, "alpha", "error")
+            self.assertNotIn(MSG, out["ESCALATE_OPS"])
+            self.assertTrue(st["all_error_alerted"])
+
+            # 4. beta goes productive — any non-error resets the latch.
+            st, out = self.record(roster, state, "beta", "productive")
+            self.assertFalse(st["all_error_alerted"])
 
 
 class TestStartup(unittest.TestCase):

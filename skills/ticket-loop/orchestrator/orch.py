@@ -392,6 +392,17 @@ OUTCOME_CLASSES = ("productive", "dry", "precheck-idle", "waiting",
                    "error", "crash", "skipped-lock")
 
 
+def current_pass_segment(lines):
+    """The tail of the log belonging to the pass that just finished: everything
+    from the last `— start (` marker on (cron-run.sh writes one per real pass).
+    A lock-yield pass writes no start marker — callers still detect it via the
+    `skip:` line at the very end of the raw tail."""
+    for i in range(len(lines) - 1, -1, -1):
+        if " — start (" in lines[i]:
+            return lines[i:]
+    return lines
+
+
 def classify_pass(rc, timed_out, outcome, log_tail, questions_count):
     """Classify one finished pass. `outcome` is the skill-emitted outcome.json
     dict (None when the pass never wrote one — cron-run.sh deletes the stale
@@ -400,12 +411,14 @@ def classify_pass(rc, timed_out, outcome, log_tail, questions_count):
         return "error", "pass hit the orchestrator timeout"
     if rc != 0:
         return "error", f"pass exited {rc}"
+    if outcome is None and any("skip:" in line for line in log_tail[-3:]):
+        # cron-run.sh yielded the singleton lock — actively worked, not dry.
+        # Checked before the guillotine marker so a lock-yield whose log segment
+        # still holds a previous pass's WARN classifies skipped-lock, not error.
+        return "skipped-lock", "runner yielded the singleton lock"
     if any("Background tasks still running" in line for line in log_tail):
         return "error", "background-guillotine WARN (a build was likely killed)"
     if outcome is None:
-        if any("skip:" in line for line in log_tail[-3:]):
-            # cron-run.sh yielded the singleton lock — actively worked, not dry
-            return "skipped-lock", "runner yielded the singleton lock"
         return "dry", "no outcome.json written (counting as dry)"
     if outcome.get("error"):
         return "error", f"pass reported: {outcome['error']}"
@@ -430,7 +443,9 @@ def cmd_classify(args):
     tail = []
     log = sd / "logs" / "ticket-loop-cron.log"
     if log.exists():
-        tail = log.read_text().splitlines()[-15:]
+        # Read a generous window, then keep only the current pass's segment so a
+        # previous pass's guillotine WARN can't bleed into this classification.
+        tail = current_pass_segment(log.read_text().splitlines()[-40:])
     questions = 0
     state_json = sd / "state.json"
     if state_json.exists():
