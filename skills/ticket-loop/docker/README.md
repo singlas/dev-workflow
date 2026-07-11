@@ -113,6 +113,37 @@ docker run --rm --network host \
 Confirm the tracker MCP answered (static key works), `gh auth` is OK, and the
 Telegram poll succeeded before enabling the timer.
 
+## Try it locally first
+
+Before you touch a server, validate the WHOLE loop on your laptop — same image,
+same volume shape, same runner, just local Docker. [`local-run.sh`](local-run.sh)
+is a thin helper around the exact commands above; each subcommand is independently
+runnable. The recommended rollout:
+
+```
+export CLAUDE_PIN=<pin>                              # same pin as the box build
+./local-run.sh build                                # build the image from the repo root
+./local-run.sh seed <your-repo-url> <base_branch> <name>   # clone into the volume (idempotent)
+./local-run.sh put-env ./agent.env.local            # write agent.env into the volume (mode 600)
+./local-run.sh dry-run <name>                        # a no-side-effects pass — no sends, no builds
+# ...then, ONCE, a supervised real pass (see the warning below):
+./local-run.sh pass <name> --yes
+```
+
+`IMAGE` / `VOLUME` default to `dev-workflow-agent:local` / `dev-workflow-agent-local`
+(override via env). `./local-run.sh clean` removes both when you're done. Iterate
+on `dry-run` until the tracker MCP answers, `gh auth` is OK, and the Telegram poll
+succeeds — then take the **same image recipe** to a server via the systemd path
+above (build → seed → agent.env → units).
+
+> **A real `pass` acts on the REAL tracker, chat group, and GitHub** — it can move
+> tickets, post messages, and open/merge PRs. That's why it requires an explicit
+> `--yes`. And the loop's pid-file singleton lock **cannot arbitrate across
+> machines, nor between this container and a host launchd/cron loop** — so before a
+> real local pass, **stop every other runner for this repo** (the box timer, a
+> laptop launchd loop, another container). Two loops on one repo will collide.
+> `dry-run` is safe to run anytime; only `pass --yes` carries this.
+
 ## The `--plugin-dir` fallback
 
 The runner invokes the baked plugin's skill as `/dev-workflow:ticket-loop` via
