@@ -128,7 +128,10 @@ $EDITOR ~/dev-workflow/.local/agent.env && chmod 600 ~/dev-workflow/.local/agent
 the installer defaults to the clone's gitignored `.local/agent.env` if it exists,
 as above. `--mcp-keyed`
 wires the keyed tracker MCP so Linear needs a static `LINEAR_API_KEY` instead of a
-browser OAuth — required on any headless box. `--refresh`/`--uninstall` work as in the
+browser OAuth — required on any headless box. **Trigger a pass by hand** with
+`install-cron.sh run-now` — it refuses while a pass is already running; add
+`--force` to SIGTERM the running pass (graceful, the lock is released) and start a
+fresh one. `--refresh`/`--uninstall` work as in the
 legacy mode; with no new flags the script is byte-for-byte its old in-tree self.
 
 **Dedicated Mac mini.** For an always-on agent host:

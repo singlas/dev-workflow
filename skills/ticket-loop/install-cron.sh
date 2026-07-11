@@ -53,19 +53,52 @@ USE_OPT=0
 MCP_KEYED=0
 ACTION=install
 
+FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --uninstall|uninstall) ACTION=uninstall ;;
     --refresh|refresh)     ACTION=refresh ;;
+    run-now|--run-now)     ACTION=run-now ;;
+    --force)     FORCE=1 ;;
     --work-tree) shift; WORK_TREE="${1:-}"; [ -n "$WORK_TREE" ] || { echo "ERROR: --work-tree needs a path" >&2; exit 2; } ;;
     --env-file)  shift; ENV_FILE="${1:-}";  [ -n "$ENV_FILE" ]  || { echo "ERROR: --env-file needs a path"  >&2; exit 2; } ;;
     --opt)       USE_OPT=1 ;;
     --mcp-keyed) MCP_KEYED=1 ;;
     install|"")  : ;;
-    *) echo "usage: install-cron.sh [--work-tree <path>] [--env-file <path>] [--opt] [--mcp-keyed] [--refresh|--uninstall]" >&2; exit 2 ;;
+    *) echo "usage: install-cron.sh [--work-tree <path>] [--env-file <path>] [--opt] [--mcp-keyed] [--refresh|--uninstall] | run-now [--force]" >&2; exit 2 ;;
   esac
   shift
 done
+
+# run-now: trigger one pass of the INSTALLED job immediately.
+#   default  — only when no pass is currently running (refuses otherwise);
+#   --force  — SIGTERM the running pass first (graceful: the runner's trap releases
+#              the singleton lock), wait for it to exit, then start a fresh one.
+if [ "$ACTION" = "run-now" ]; then
+  launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 \
+    || { echo "ERROR: $LABEL is not installed (set TICKET_LOOP_LABEL if yours differs)" >&2; exit 1; }
+  running_pid() { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^\s*pid = /{print $3}'; }
+  PID="$(running_pid)"
+  if [ -n "$PID" ]; then
+    if [ "$FORCE" != "1" ]; then
+      echo "A pass is already running (pid $PID). Re-run with --force to kill it first." >&2
+      exit 1
+    fi
+    echo "Terminating running pass (pid $PID)…"
+    launchctl kill SIGTERM "$DOMAIN/$LABEL"
+    for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+      sleep 2
+      [ -z "$(running_pid)" ] && break
+    done
+    if [ -n "$(running_pid)" ]; then
+      echo "ERROR: pass did not exit within 30s — not starting another. Investigate, or kill -9 by hand." >&2
+      exit 1
+    fi
+  fi
+  launchctl kickstart "$DOMAIN/$LABEL" \
+    && echo "Kicked one pass of $LABEL (watch the loop's cron log for the start line)."
+  exit $?
+fi
 
 # Default secrets location: <framework clone>/.local/agent.env (gitignored). Used only
 # in external-runner mode when --env-file/DW_ENV_FILE wasn't given and the file exists.
