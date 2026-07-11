@@ -1,64 +1,133 @@
-# ai-dev-prompts
+# dev-workflow
 
-Curated AI prompts for developer workflows — context file generation, codebase documentation, audits, web optimization, and more. Built for teams standardizing on AI-assisted development.
+**CI, but for ticket work.** A generic runner + a Claude Code plugin read one
+per-repo `dev-workflow.yml` and work your board — picking up tickets, asking
+clarifying questions in team chat, and opening one reviewable PR per ticket —
+inside guardrails a repo can *tighten but never loosen*. Same shape as CI:
+generic runner, per-repo config file, non-escapable guardrails. Point it at any
+codebase.
 
-> **⭐ Featured: [`skills/ticket-loop/`](skills/ticket-loop/)** — an autonomous coding agent you manage from a Telegram group. It works your Linear board, asks clarifying questions in the group, and opens one reviewable PR per ticket — no framework, no service to host, just a Claude Code skill + a stdlib-Python bridge. Drop the folder into `.claude/skills/` and follow its README. Full story: [An engineer you manage from a group chat](https://niptao.com/blog/an-engineer-you-manage-from-a-group-chat/).
->
-> **🧩 [`dev-workflow/`](dev-workflow/)** wraps that agent — plus the `standup`/`cleanup`/`release` skills — into a config-driven framework: **CI, but for ticket work.** A generic runner + Claude Code plugin reads one per-repo `dev-workflow.yml` and works your board inside guardrails a repo can tighten but never loosen. Point it at any codebase.
+Three moves, pick what you need:
 
-## The Problem
+1. **Install the plugin** for the interactive session skills — `/standup`,
+   `/cleanup`, `/release`, and `/ticket-loop` driven by hand.
+2. **Drop one `dev-workflow.yml`** into your repo to wire your branch model,
+   tracker (team + roles), test/lint commands, and any tightened guardrails.
+3. **Optionally deploy the Docker runner** for the autonomous **ticket-loop** —
+   an AI teammate you manage from a Telegram group: it works your board, batches
+   questions in the group, opens one PR per ticket, then babysits it (review
+   comments, red CI, merge conflicts) and reports a daily digest.
 
-Every major AI coding tool has its own project context file. Same purpose, different locations:
+Secrets are injected at runtime; the framework is baked **read-only** so the
+agent physically cannot edit its own leash. The narrative behind the skills is
+the [dev-process playbook](dev-process/README.md).
 
-| Tool | File | Location |
+> This repo was previously a collection of standalone AI prompts. Those still
+> ship here — see **[§4 Also in this repo: the prompt collections](#4-also-in-this-repo-the-prompt-collections)** —
+> but the framework is now the front door.
+
+## 1. Quickstart
+
+### Interactive skills
+
+1. **Install the plugin.** Either `claude plugin install` (plugin name
+   `dev-workflow`), or point Claude Code at a clone of this repo:
+
+   ```
+   claude --plugin-dir <path-to-this-clone>
+   ```
+
+   It provides `/standup`, `/cleanup`, `/release`, and `/ticket-loop`.
+
+2. **Add a config.** Copy [`dev-workflow.example.yml`](dev-workflow/dev-workflow.example.yml)
+   to your repo root as `dev-workflow.yml` and edit the values (branch model,
+   tracker team/roles, test/lint commands, tightened guardrails).
+
+3. **Validate it:**
+
+   ```
+   python3 dev-workflow/validate.py dev-workflow.yml     # -> OK: dev-workflow.yml
+   ```
+
+   The validator rejects unknown keys and any config that tries to *loosen* a
+   baseline (see the boundary rules below).
+
+4. **Open a session** with `/standup` (board orientation + recommended starting
+   points), and close it with `/cleanup` (commit → push → PR into your base
+   branch → tickets to Done). Promote to prod with `/release`.
+
+### Autonomous ticket-loop
+
+The loop runs the same framework unattended, on a timer, in a container:
+
+- **The agent** — what it does and how you manage it from a group chat:
+  [`skills/ticket-loop/README.md`](skills/ticket-loop/README.md)
+- **The Docker runner** — build the image, mount your work tree, set the timer:
+  [`skills/ticket-loop/docker/README.md`](skills/ticket-loop/docker/README.md)
+
+## 2. How it's put together
+
+Everything splits into **three zones** — the framework is generic and shared,
+the target repo owns only its config, and secrets live nowhere in git. Full
+detail (baseline guardrails, tracker seam, distribution) is the deep-dive in
+[`dev-workflow/README.md`](dev-workflow/README.md).
+
+| Zone | Owns | Lives in |
 |---|---|---|
-| Cursor (legacy) | `.cursorrules` | Project root |
-| Cursor (new) | `.cursor/rules/*.mdc` | `.cursor/rules/` directory |
-| Claude Code CLI | `CLAUDE.md` | Project root |
-| Gemini CLI | `GEMINI.md` | Project root |
-| Google Antigravity | `.agent/rules/*.md` | `.agent/rules/` directory |
-| GitHub Copilot | `.github/copilot-instructions.md` | `.github/` directory |
-| Windsurf | `.windsurfrules` | Project root |
-| Cline | `.clinerules` | Project root |
-| OpenAI Codex | `AGENTS.md` | Project root |
-| Zed | `.zed/settings.json` | `.zed/` directory |
+| **Framework** (generic) | Plugin (skills), runner scripts, Docker image, validator. Identical across every repo. | This repo — `.claude-plugin/` + `skills/` + `dev-workflow/`; baked root-owned at `/opt/dev-workflow` in the container. |
+| **Target-repo config** | One `dev-workflow.yml` + the repo's own `CLAUDE.md`. Branch model, tracker team/roles, commands, tightened guardrails. | The target repo root. |
+| **Injected** | Secrets (`agent.env`), Claude auth (`~/.claude`), the loop's `state.json`. Never in git. | A mounted volume / the runtime environment. |
 
-**The content is ~90% the same across all tools.** The investment in one context file is reusable — copy content, change file name.
+Two boundary rules make it safe to point at any repo:
 
-**Only ~30% of developers use context files.** This is the single biggest gap between "fancy autocomplete" and genuinely productive AI-assisted development.
+1. **Config can only tighten, never loosen.** Baseline guardrails are
+   framework-side constants. A `dev-workflow.yml` may *add* protected paths or
+   *lower* a diff budget, but can never switch a baseline off or raise a ceiling.
+   `validate.py` enforces the ceilings; the runner enforces the baseline.
+2. **The runner lives outside the mounted work tree.** In the container the
+   runner + plugin are baked root-owned at `/opt/dev-workflow`; the target repo
+   is the mounted volume the build subagent edits as a non-root user — so it
+   *physically cannot* edit the framework driving it.
 
-## What's in This Repo
+The framework files:
+
+| Piece | What It Does |
+|-------|-------------|
+| [dev-workflow/README.md](dev-workflow/README.md) | Framework overview: three zones, two boundary rules, baseline guardrails, distribution (Docker runner + Claude Code plugin) |
+| [dev-workflow/dev-workflow.example.yml](dev-workflow/dev-workflow.example.yml) | Annotated full config — branch model, tracker team/roles, test/lint commands, tightened guardrails, schedule |
+| [dev-workflow/validate.py](dev-workflow/validate.py) | Schema + tighten-only validator — rejects unknown keys and any config that raises a ceiling |
+| [dev-workflow/dw-config.py](dev-workflow/dw-config.py) | Dotted-path config reader shell scripts use (`dw-config.py dev-workflow.yml tracker.team`) |
+| [dev-workflow/tracker-adapters.md](dev-workflow/tracker-adapters.md) | The provider seam — canonical verbs (`list_actionable`, `move`, `label`, …) mapped onto a tracker (Linear today; GitHub Issues sketch) |
+| [skills/standup/](skills/standup/) · [skills/cleanup/](skills/cleanup/) · [skills/release/](skills/release/) | The session skills — open a session, close it into a PR, promote to prod. Driven entirely by `dev-workflow.yml` |
+| [skills/ticket-loop/](skills/ticket-loop/) | The autonomous agent + its [`docker/`](skills/ticket-loop/docker/) runner packaging |
+
+## 3. Repo map
 
 ```
-ai-dev-prompts/
-├── context-files/           # AI tool context file generators
-├── codebase-audit-docs/     # 3-prompt multi-repo audit pipeline
-├── web-optimization/        # PageSpeed + SEO/GEO/AEO prompts
-├── workflows/               # Process & handover prompts
-├── skills/                  # Claude Code skills — full working agents, not just prompts
-├── dev-workflow/            # The framework: per-repo config contract + validator + tracker seam
-├── dev-process/             # Full AI-team dev process: branches, worktrees, skills, agent loop
+dev-workflow/
+├── dev-workflow/            # The framework: config contract + validator + tracker seam
+├── skills/                  # Claude Code plugin skills — standup, cleanup, release, ticket-loop
+├── dev-process/             # The narrative playbook behind the skills (branches, worktrees, loop)
+├── .claude-plugin/          # Plugin manifest (plugin name: dev-workflow)
+├── context-files/           # (collection) AI tool context-file generators
+├── codebase-audit-docs/     # (collection) 3-prompt multi-repo audit pipeline
+├── web-optimization/        # (collection) PageSpeed + SEO/GEO/AEO prompts
+├── workflows/               # (collection) Process & handover prompts
 └── site/                    # HTML guide page + assets
 ```
 
-### 0. Skills (`skills/`) — working Claude Code agents
+## 4. Also in this repo: the prompt collections
 
-Complete, drop-in Claude Code skills (a `SKILL.md` plus any helper script it
-needs). First entry: [`skills/ticket-loop/`](skills/ticket-loop/) — an
-autonomous coding agent that works your Linear board and is managed entirely
-from a Telegram group (bug reports with screenshots, approvals, clarifying
-questions), opening one reviewable PR per ticket — then babysitting it:
-addressing review comments and red CI, healing merge conflicts, closing the
-ticket when the PR merges, and reporting in with a daily digest. No framework —
-one skill file + one stdlib-Python Telegram bridge; copy the folder into
-`.claude/skills/` and follow its README. Alongside it are the three session
-skills — [`skills/standup/`](skills/standup/), [`skills/cleanup/`](skills/cleanup/),
-[`skills/release/`](skills/release/) — real plugin skills that open/close a dev
-session and promote to prod, all driven by one `dev-workflow.yml`. More skills coming.
+Before the framework, this repo was a curated set of standalone AI prompts for
+developer workflows. They still ship here — copy-paste into your AI tool, no
+install required.
 
-### 1. Context File Generators (`context-files/`)
+### Context file generators (`context-files/`)
 
-Prompts that scan your existing codebase and auto-generate the right context file for your AI tool. No manual writing required — paste the prompt, review the output, commit.
+Prompts that scan your existing codebase and auto-generate the right context
+file for your AI tool. Every major AI coding tool has its own project context
+file — same purpose, different location; the content is ~90% the same across
+all of them.
 
 | Prompt | Tool | Type |
 |---|---|---|
@@ -68,16 +137,12 @@ Prompts that scan your existing codebase and auto-generate the right context fil
 | [gemini-rules-generator.md](context-files/gemini-rules-generator.md) | Gemini CLI | `GEMINI.md` — terminal agent onboarding docs |
 | [antigravity-rules-generator.md](context-files/antigravity-rules-generator.md) | Google Antigravity | `.agent/rules/*.md` with activation modes |
 
-### 2. Codebase Audit & Documentation (`codebase-audit-docs/`)
+### Codebase audit & documentation (`codebase-audit-docs/`)
 
-A 3-prompt pipeline for multi-repo projects. Generates full platform documentation, runs a comprehensive codebase audit, and then updates AI context files in every repo — all using AI. See example output: [Sample Audit Report](https://www.shashanksingla.com/audit-report.html) · [Sample Documentation](https://www.shashanksingla.com/sample-documentation.html).
-
-**The workflow:**
-
-```
-1. Documentation  →  2. Audit  →  3. Context Update
-   (generates)        (analyzes)     (propagates)
-```
+A 3-prompt pipeline for multi-repo projects: generate full platform docs, run a
+scored audit, then update AI context files in every repo. Run them **in order**.
+See example output: [Sample Audit Report](https://www.shashanksingla.com/audit-report.html) ·
+[Sample Documentation](https://www.shashanksingla.com/sample-documentation.html).
 
 | Step | Prompt | What It Does |
 |------|--------|-------------|
@@ -85,115 +150,40 @@ A 3-prompt pipeline for multi-repo projects. Generates full platform documentati
 | 2 | [prompt-audit.md](codebase-audit-docs/prompt-audit.md) | Reads generated docs + source code, produces a scored audit with executive summary and per-area reports |
 | 3 | [prompt-context-update.md](codebase-audit-docs/prompt-context-update.md) | Uses docs + audit findings to update `.cursorrules` and `CLAUDE.md` in every repo |
 
-**Prerequisites:** Install [`gh` CLI](https://cli.github.com/), clone all project repos into one folder, create an empty documentation repo. Full setup instructions in the [codebase-audit-docs README](codebase-audit-docs/README.md).
+Setup (clone all repos, create an empty docs repo): [codebase-audit-docs README](codebase-audit-docs/README.md).
 
-### 3. Web Optimization (`web-optimization/`)
+### Web optimization (`web-optimization/`)
 
-Prompts for auditing and improving web performance and search visibility. Both follow a 2-phase pattern: audit first, then implement fixes one at a time.
+Prompts for auditing and improving web performance and search visibility — each
+follows a 2-phase pattern: audit first, then implement fixes one at a time.
 
 | Prompt | What It Does |
 |--------|-------------|
 | [pagespeed-optimization.md](web-optimization/pagespeed-optimization.md) | PageSpeed audit — critical request chains, unused JS, render-blocking resources, LCP, image optimization |
 | [seo-geo-aeo-optimization.md](web-optimization/seo-geo-aeo-optimization.md) | Full SEO + GEO (AI search engines) + AEO (voice/snippets) audit — meta tags, structured data, llms.txt, FAQ schema |
 
-### 4. Workflows (`workflows/`)
-
-Process prompts for team operations and project management.
+### Workflows (`workflows/`)
 
 | Prompt | What It Does |
 |--------|-------------|
 | [project-handover.md](workflows/project-handover.md) | Structured handover checklist — credentials, access transfer, infrastructure, DNS, verification steps |
 
-### 5. Dev Process (`dev-process/`)
+### Dev process (`dev-process/`)
 
-A complete, battle-tested development process for a small team (or solo founder)
-working with AI coding agents — the [full playbook](dev-process/README.md) plus
-ready-to-copy scripts and skill templates:
+The full playbook the framework grew out of — the two-branch model (`dev` trunk
+/ `main` = prod mirror), GitHub setup, worktree slots for parallel agent
+sessions, and the daily loop — plus ready-to-copy scripts. The plugin skills
+(`standup`/`cleanup`/`release`/`ticket-loop`) are the productized form of it.
 
 | Piece | What It Does |
 |-------|-------------|
-| [README.md](dev-process/README.md) | The playbook: two-branch model (`dev` trunk / `main` = prod mirror, deploys only via a deliberate `dev→main` PR), GitHub setup (branch ruleset + auto-delete head branches, with ready `gh api` commands), worktree slots for parallel agent sessions, the daily loop |
-| [scripts/worktree-reset.sh](dev-process/scripts/worktree-reset.sh) | Fresh auto-numbered branch off latest `dev` per worktree slot; symlinks shared per-machine state; garbage-collects dead worktrees + merged branches (`--gc`) |
+| [README.md](dev-process/README.md) | The narrative playbook: branch model, GitHub ruleset, worktree slots, the daily loop |
+| [scripts/worktree-reset.sh](dev-process/scripts/worktree-reset.sh) | Fresh auto-numbered branch off latest `dev` per worktree slot; symlinks shared state; GCs dead worktrees + merged branches |
 | [scripts/ship-preflight.sh](dev-process/scripts/ship-preflight.sh) | The deterministic git dance behind "wrap up and open a PR" — assess + sync-push in two reviewable calls |
-| [skills/standup/](skills/standup/) | Session opener — board orientation + 2-4 recommended starting points. Real plugin skill, driven by `dev-workflow.yml` (stub: [dev-process/skills/standup.md](dev-process/skills/standup.md)) |
-| [skills/cleanup/](skills/cleanup/) | Session closer — commit, push, PR into the base branch, close tickets, handoff notes. Real plugin skill (stub: [dev-process/skills/cleanup.md](dev-process/skills/cleanup.md)) |
-| [skills/release/](skills/release/) | The base→prod promotion that deploys — version bump, tag, release PR; **refuses without `prod_branch`/`deploy.trigger`**; merging stays the human's click. Real plugin skill (stub: [dev-process/skills/release.md](dev-process/skills/release.md)) |
-| [`skills/ticket-loop/`](skills/ticket-loop/) | The autonomous "AI employee" — the drop-in ticket-loop skill (§0) is the agent half of this process: labeled ticket queue, batched questions in team chat, isolated-worktree builds, PR babysitting, daily digest, prompt-injection guardrails |
 
-### 6. Dev Workflow Framework (`dev-workflow/`)
+## 5. Design principles
 
-The `dev-process/` playbook and the `skills/ticket-loop/` agent, packaged as a
-config-driven framework — **CI, but for ticket work.** A generic runner + a
-Claude Code plugin read one per-repo `dev-workflow.yml` and work your board
-(pick up tickets, ask questions in team chat, open one reviewable PR each)
-inside framework guardrails a repo can *tighten but never loosen*. Same shape
-as CI: generic runner, per-repo config file, non-escapable guardrails.
-
-| Piece | What It Does |
-|-------|-------------|
-| [README.md](dev-workflow/README.md) | Framework overview: the three zones (framework / target-repo config / injected), the two boundary rules (config tightens-only, runner lives outside the work tree), the baseline guardrails, and distribution (Docker runner + Claude Code plugin) |
-| [dev-workflow.example.yml](dev-workflow/dev-workflow.example.yml) | Annotated full config example — branch model, tracker team/roles, test/lint commands, tightened guardrails, schedule |
-| [validate.py](dev-workflow/validate.py) | Schema + tighten-only validator — rejects unknown keys and any config that tries to raise a ceiling (`python3 dev-workflow/validate.py dev-workflow.yml` → `OK`) |
-| [dw-config.py](dev-workflow/dw-config.py) | Dotted-path config reader shell scripts use (`dw-config.py dev-workflow.yml tracker.team`) |
-| [tracker-adapters.md](dev-workflow/tracker-adapters.md) | The provider seam — canonical verbs (`list_actionable`, `move`, `label`, …) mapped onto a tracker (Linear today; GitHub Issues sketch for adding one) |
-
-### Coming Soon
-
-- **Copilot instructions generator** — `.github/copilot-instructions.md`
-- **Windsurf / Cline generators** — `.windsurfrules`, `.clinerules`
-- **Codex agent generator** — `AGENTS.md`
-- **Output templates** — starter templates for each context file format
-
-## Quick Start
-
-### For context file generation (single repo)
-
-1. Pick the prompt that matches your AI tool (see decision tree below)
-2. Copy the prompt and paste it into your AI tool
-3. **Use the best model available** — Claude Sonnet/Opus, GPT-4o, or Gemini 2.5 Pro
-4. Review the output — verify stack versions, conventions, and security rules
-5. Commit the generated file to git
-
-### For documentation + audit (multi-repo)
-
-1. Follow the setup in the [codebase-audit-docs README](codebase-audit-docs/README.md)
-2. Run the 3 prompts in order: documentation → audit → context update
-3. Review, commit, and push all generated files
-
-## Which Prompt Should I Use?
-
-```
-What do you need?
-
-Generate a context file for ONE repo
-├── IDE (Cursor, Antigravity, VS Code)
-│   ├── Simple/single repo? → cursorrules-small-repo.md
-│   ├── Complex/monorepo?   → cursorrules-large-repo.md
-│   └── Antigravity?        → antigravity-rules-generator.md
-└── Terminal agent (CLI)
-    ├── Claude Code?  → claude-md-generator.md
-    └── Gemini CLI?   → gemini-rules-generator.md
-
-Document & audit a MULTI-REPO platform
-└── codebase-audit-docs/ (run all 3 prompts in order)
-
-Optimize web performance
-├── PageSpeed / Core Web Vitals → web-optimization/pagespeed-optimization.md
-└── SEO / AI search / snippets  → web-optimization/seo-geo-aeo-optimization.md
-
-Hand over a project to a new team
-└── workflows/project-handover.md
-
-Set up an AI-assisted dev process for a team
-├── Branch model + worktrees + GitHub setup → dev-process/README.md
-├── Session skills (standup/cleanup/release) → skills/{standup,cleanup,release}/
-├── Autonomous ticket-working agent          → skills/ticket-loop/
-└── Config-driven framework for any repo     → dev-workflow/README.md
-```
-
-## Design Principles
-
-These prompts are designed to:
+The prompt collections are designed to:
 
 1. **Auto-generate from existing code** — scan the repo, don't start from scratch
 2. **Never guess** — if something can't be determined, write "Unknown" instead of hallucinating
@@ -201,31 +191,19 @@ These prompts are designed to:
 4. **Be copy-paste ready** — no customization needed for basic setup
 5. **Work across stacks** — JS/TS, Python, Ruby, Go, Java, .NET, and more
 
-## Contributing
+## 6. Contributing
 
-This repo is a living collection. Contributions are welcome and encouraged.
+This repo is a living collection. Contributions are welcome.
 
-### Ways to Contribute
+- **Improve the framework** — sharper guardrails, a new tracker adapter, a
+  cleaner runner.
+- **Improve existing prompts** — clearer sections, cases a prompt misses.
+- **Add new tool generators** — Windsurf, Cline, Codex, Copilot, Zed.
+- **Share your generated output** — great (or terrible) results make good
+  examples for others.
 
-- **Improve existing prompts** — found a section that could be clearer, or a case the prompt misses? Open a PR.
-- **Add new tool generators** — Windsurf, Cline, Codex, Copilot, Zed — all need prompts.
-- **Add workflow prompts** — code review, migration planning, refactoring, debugging workflows.
-- **Share your generated output** — if you ran a prompt and the result was great (or terrible), share it as an example so others can learn.
-- **Report issues** — if a prompt hallucinates versions, misses conventions, or generates weak security rules, open an issue.
-
-### How to Contribute
-
-1. Fork this repo
-2. Create a branch (`git checkout -b add-windsurf-generator`)
-3. Add or edit your prompt file
-4. Open a PR with a brief description of what changed and why
-
-### What Makes a Good Prompt
-
-- **Grounded in repo contents** — never asks the AI to guess or assume
-- **Security-first** — always includes protected areas for secrets, auth, CI/CD
-- **Tool-aware** — accounts for what the specific tool can and can't do
-- **Concise output** — the generated context file should be useful, not exhaustive
+To contribute: fork, branch (`git checkout -b my-change`), edit, and open a PR
+with a brief description of what changed and why.
 
 ## References
 

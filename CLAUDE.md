@@ -2,12 +2,33 @@
 
 ## Project Overview
 
-A curated collection of AI prompts for developer workflows — context file generation, codebase audits, documentation, web optimization, SEO, and project handover. Built for teams standardizing on AI-assisted development.
+`dev-workflow` is the framework — **CI, but for ticket work.** A generic runner +
+Claude Code plugin read one per-repo `dev-workflow.yml` and work your board
+(pick up tickets, ask questions in team chat, open one reviewable PR each)
+inside guardrails a repo can tighten but never loosen. The framework leads;
+the original standalone AI-prompt collections (context files, audits,
+web-optimization, handover) still ship here as a secondary section.
 
 ## Repository Structure
 
 ```
-ai-dev-prompts/
+dev-workflow/
+├── dev-workflow/            # THE FRAMEWORK: per-repo config contract + validator + tracker seam
+│   ├── README.md            # 3 zones, 2 boundary rules, baseline guardrails, distribution
+│   ├── dev-workflow.example.yml  # annotated full config (generic values)
+│   ├── validate.py          # schema + tighten-only validator (PyYAML)
+│   ├── dw-config.py          # dotted-path config reader for shell callers
+│   ├── test_validate.py     # unittest for validate.py
+│   └── tracker-adapters.md  # canonical verbs → provider mapping (Linear impl)
+├── skills/                  # Claude Code plugin skills — standup, cleanup, release, ticket-loop
+│   ├── standup/  cleanup/  release/   # session skills, driven by dev-workflow.yml
+│   └── ticket-loop/         # autonomous agent + docker/ runner packaging
+├── dev-process/             # The narrative playbook behind the skills
+│   ├── README.md            # branch model, worktrees, GitHub setup, daily loop, agent loop
+│   └── scripts/             # worktree-reset.sh, ship-preflight.sh (ready to copy)
+├── .claude-plugin/          # Plugin manifest (plugin name: dev-workflow)
+│   └── plugin.json
+│   # ── legacy prompt collections (secondary in the README) ──
 ├── context-files/           # Prompts that generate AI tool context files
 │   ├── cursorrules-small-repo.md
 │   ├── cursorrules-large-repo.md
@@ -23,19 +44,6 @@ ai-dev-prompts/
 │   └── seo-geo-aeo-optimization.md
 ├── workflows/               # Process & handover prompts
 │   └── project-handover.md
-├── skills/                  # Complete drop-in Claude Code skills (not just prompts)
-│   └── ticket-loop/         # autonomous coding agent managed from a Telegram group
-├── dev-workflow/            # The framework: per-repo config contract + validator + tracker seam
-│   ├── README.md            # 3 zones, 2 boundary rules, distribution
-│   ├── dev-workflow.example.yml  # annotated full config (generic values)
-│   ├── validate.py          # schema + tighten-only validator (PyYAML)
-│   ├── dw-config.py          # dotted-path config reader for shell callers
-│   ├── test_validate.py     # unittest for validate.py
-│   └── tracker-adapters.md  # canonical verbs → provider mapping (Linear impl)
-├── dev-process/             # AI-team dev process: playbook + scripts + skill templates
-│   ├── README.md            # branch model, worktrees, GitHub setup, daily loop, agent loop
-│   ├── scripts/             # worktree-reset.sh, ship-preflight.sh (ready to copy)
-│   └── skills/              # standup, cleanup, release templates (agent loop → ../skills/)
 ├── site/                    # HTML guide page + static assets
 │   ├── index.html
 │   └── assets/
@@ -53,9 +61,11 @@ ai-dev-prompts/
 
 ## Conventions
 
+- README.md leads with the framework (pitch → quickstart → how it's put together)
+  and demotes the prompt collections into a secondary "Also in this repo" section;
+  keep that ordering when editing
 - All prompts are Markdown files organized into categorized subdirectories
-- README.md serves as the main index with a decision tree for prompt selection
-- Each prompt category has its own folder and numbered section in the README
+- Each prompt collection has its own folder and a numbered subsection in the README
 - `site/` contains the HTML guide page and is not a prompt directory
 - `dev-workflow/` is a real framework, not prompts: the per-repo `dev-workflow.yml`
   contract, its PyYAML validator (`validate.py` — enforces boundary rule 1,
