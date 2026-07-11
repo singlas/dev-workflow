@@ -65,7 +65,9 @@ COPY .claude-plugin/ /opt/dev-workflow/plugin/.claude-plugin/
 COPY skills/ /opt/dev-workflow/plugin/skills/
 # The keyed tracker MCP config the runner passes via TICKET_LOOP_MCP_CONFIG.
 COPY skills/ticket-loop/docker/loop-mcp.json /opt/dev-workflow/loop-mcp.json
-RUN chmod -R 755 /opt/dev-workflow
+# PATH-visible Telegram bridge (same public CLI the --opt native install exposes).
+RUN chmod -R 755 /opt/dev-workflow \
+    && ln -sf /opt/dev-workflow/bin/telegram.py /usr/local/bin/dw-telegram
 
 # Non-root agent user. Its home (/home/agent) is where the persistent volume mounts:
 # ~/.claude (auth), the work-tree checkout, agent.env, state.json, .venv.

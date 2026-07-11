@@ -185,10 +185,13 @@ the PR URL, and wait.
 
 Merging is the human's call. Once it's merged — they tell you, or you confirm with
 `gh pr view <num> --json state,mergedAt` — announce to `deploy.announce`. When it's
-`telegram`, use the bundled bridge (same one the loop uses):
+`telegram`, use the bundled bridge (same one the loop uses) — installed on PATH as
+`dw-telegram` by the hardened installs, else the framework copy:
 
 ```bash
-python3 telegram.py send "🚀 Released v<new> — <one-line theme>. <3-6 highlight bullets>"
+dw-telegram send "🚀 Released v<new> — <one-line theme>. <3-6 highlight bullets>"
+# fallback when the symlink isn't installed:
+#   python3 /opt/dev-workflow/bin/telegram.py send "…"   (or the framework clone's copy)
 ```
 
 Write the highlights for the people reading the channel — what changed *for them*,

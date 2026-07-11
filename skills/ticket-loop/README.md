@@ -155,6 +155,26 @@ passes `--plugin-dir /opt/dev-workflow/plugin` when the pinned `claude` supports
 flag, and falls back to a repo-local `/ticket-loop` (with a logged warning) when it
 doesn't.
 
+### The Telegram bridge as a standalone CLI (`dw-telegram`)
+
+`telegram.py` is a public interface, not just loop plumbing — stdlib-only, so any
+repo skill or script can use it to talk to the team group. Both hardened installs
+expose it on PATH as **`dw-telegram`** (the `--opt` native install symlinks it into
+`/usr/local/bin`; the Docker image does the same):
+
+```
+dw-telegram send "🚀 Released v1.2 — highlights…"
+dw-telegram send-photo screenshot.png --caption "before/after"
+dw-telegram send-document report.pdf --caption "weekly review"
+dw-telegram discover        # find the group's chat id when setting up
+```
+
+Auth: `TELEGRAM_BOT_TOKEN` + `AGENT_TELEGRAM_CHAT_ID` from the environment, falling
+back to the current repo's `.env`. Target-repo skills should call `dw-telegram`
+(and can fall back to `/opt/dev-workflow/bin/telegram.py` or a framework clone when
+the symlink isn't installed) — don't vendor a copy of the bridge into each repo;
+copies drift.
+
 ## The group-chat grammar
 
 | You type in Telegram | What happens |

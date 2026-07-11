@@ -198,6 +198,9 @@ if [ "$USE_OPT" = "1" ]; then
   sudo cp "$SCRIPT_DIR/docker/loop-mcp.json" "$OPT_ROOT/loop-mcp.json"
   sudo chown -R root:wheel "$OPT_ROOT"
   sudo chmod -R 755 "$OPT_ROOT"
+  # PATH-visible Telegram bridge — a public CLI for repo skills/scripts to send
+  # to the team group (send / send-photo / send-document / poll / discover).
+  sudo ln -sf "$OPT_ROOT/bin/telegram.py" /usr/local/bin/dw-telegram
   RUN_PASS="$OPT_ROOT/bin/run-pass.sh"
   PLUGIN_DIR="$OPT_ROOT/plugin"
   MCP_CONFIG="$OPT_ROOT/loop-mcp.json"
