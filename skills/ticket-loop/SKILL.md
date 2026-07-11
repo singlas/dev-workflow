@@ -241,6 +241,24 @@ invisible; if someone seems to have approved but nothing arrived, that's why.
   the ticket carries an **exclude** label, do NOT queue it — reply `🙅 ABC-123 is
   marked <label> — remove the label in the tracker first if you really want the
   agent on it.`
+- **Flag request** — first line starts case-insensitive with `flag:` (`ticket: null`):
+  `create_ticket` (title = first line minus `flag:`; description = remaining lines +
+  `Flagged via Telegram by <from>.`), then `label` it with the **flagged** role
+  (`roles.flagged.label`). Do **not** apply the **queue** label — a flagged item is for
+  the weekly cleanup checklist (human review), not an agent build. Ack `🚩 ABC-<n>
+  flagged — on the weekly cleanup checklist`. `flag ABC-123` (an existing ticket) →
+  `label` it **flagged** and ack `🚩 ABC-123 flagged`.
+- **Open-questions request** — a bare `questions` / `open questions` (`ticket: null`):
+  run `dw-telegram questions` and `telegram.py send` the list back to the group (each
+  outstanding ❓ with its ticket + age; legacy entries show the ticket only). If there
+  are none, send `✅ No open questions`. Read-only — this clears nothing and never
+  advances the offset.
+- **Prune-questions request** — a bare `prune questions` / `prune closed questions`
+  (`ticket: null`): run the prune pass from *Clearing stale questions* below —
+  `get_ticket` each open-question entry, and for those whose state is **done** or
+  canceled, `dw-telegram questions --clear <message_id>` and drop the **blocked** label
+  if still present. `telegram.py send` a one-line summary of what was cleared, or
+  `✅ Nothing to prune — every open question maps to a live ticket`.
 - Anything else with `ticket: null` is group chatter — ignore it.
 
 **Draining is continuous, not just step 1 — re-drain after every send.** A build
