@@ -18,6 +18,11 @@ Three moves, pick what you need:
    questions in the group, opens one PR per ticket, then babysits it (review
    comments, red CI, merge conflicts) and reports a daily digest.
 
+**Works today with [Linear](https://linear.app) as the tracker and
+[Telegram](https://telegram.org) as the team chat.** Both sit behind an adapter
+seam ([tracker-adapters.md](dev-workflow/tracker-adapters.md)) — GitHub Issues /
+Jira / Slack later means a new mapping, not a rewrite.
+
 Secrets are injected at runtime; the framework is baked **read-only** so the
 agent physically cannot edit its own leash. The narrative behind the skills is
 the [dev-process playbook](dev-process/README.md).
@@ -27,6 +32,12 @@ the [dev-process playbook](dev-process/README.md).
 > but the framework is now the front door.
 
 ## 1. Quickstart
+
+**You need:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with
+your tracker connected (Linear's MCP, or a `LINEAR_API_KEY` for the headless
+loop). Only for the autonomous loop and release announcements: a Telegram bot
+token + group chat id, and a GitHub token for PRs — all injected via env vars,
+enumerated in [`skills/ticket-loop/env.example`](skills/ticket-loop/env.example).
 
 ### Interactive skills
 
@@ -52,9 +63,20 @@ the [dev-process playbook](dev-process/README.md).
    The validator rejects unknown keys and any config that tries to *loosen* a
    baseline (see the boundary rules below).
 
-4. **Open a session** with `/standup` (board orientation + recommended starting
-   points), and close it with `/cleanup` (commit → push → PR into your base
-   branch → tickets to Done). Promote to prod with `/release`.
+4. **Open a session** with `/standup`, close it with `/cleanup`, promote with
+   `/release`.
+
+### The skills at a glance
+
+Each skill reads `dev-workflow.yml` for your branch names, tracker roles, and
+commands — and each sits one step further up a deliberate safety gradient:
+
+| Skill | What it does | Blast radius |
+|---|---|---|
+| `/standup` | Opens a session: board snapshot, what's In Progress to resume, 2-4 recommended starting tickets with one-line whys | **Read-only** — never moves a ticket |
+| `/cleanup` | Closes a session: commit what's left → sync with the base branch → push → open the PR → move the session's finished tickets to Done | Pushes *your feature branch*; merging its PR lands on the base branch and **never deploys** |
+| `/release` | The promotion: absorb hotfixes, test gate, bump `version.file`, tag, open the base→prod PR — then **stops. A human merges; the merge deploys.** Refuses to run at all if `repo.prod_branch` / `deploy.trigger` aren't configured | The **only** skill that touches prod, and it's human-gated at the merge |
+| `/ticket-loop` | One pass of the autonomous agent: daily digest → drain the Telegram group (answers, new tickets, approvals) → babysit open PRs → build the next actionable tickets, one PR each | Same baseline guardrails as the containerized runner |
 
 ### Autonomous ticket-loop
 
