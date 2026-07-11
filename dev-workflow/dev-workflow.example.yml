@@ -76,6 +76,14 @@ schedule:
   tz: America/New_York           # IANA timezone name
   every: 30m                     # cadence between passes
 
+# Optional: enables cleanup's blog-proposal step. When set, cleanup MAY offer to
+# turn a sharp, non-obvious session learning into one local draft — it never
+# auto-writes and never publishes. Omit this whole section to disable the offer.
+# blog:
+#   skill: blog-from-session            # repo-local skill to invoke (falls back to the bundled one)
+#   posts_dir: docs/blog                # where the bundled skill writes drafts
+#   publish: "scripts/blog-publish.sh"  # optional publish command; NEVER run unprompted. Omit for none
+
 # Optional: a command run before each loop pass (e.g. refresh the board).
 # hooks:
 #   pre_pass: "scripts/linear-snapshot.sh"

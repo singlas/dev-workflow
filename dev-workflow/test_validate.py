@@ -72,6 +72,17 @@ class ValidateTests(unittest.TestCase):
         errors = _errors_for(cfg)
         self.assertTrue(any("off_limits" in e for e in errors), errors)
 
+    def test_blog_non_mapping_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["blog"] = "docs/blog"
+        errors = _errors_for(cfg)
+        self.assertTrue(any("blog" in e for e in errors), errors)
+
+    def test_valid_blog_passes(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["blog"] = {"skill": "blog-from-session", "posts_dir": "docs/blog"}
+        self.assertEqual(_errors_for(cfg), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,7 +27,8 @@ except ImportError:
     sys.exit(1)
 
 ALLOWED_TOP = {"repo", "tracker", "chat", "quality", "version", "deploy",
-               "board", "guardrails", "build", "schedule", "hooks", "runtime"}
+               "board", "guardrails", "build", "schedule", "hooks", "runtime",
+               "blog"}
 REQUIRED = {"repo": ["base_branch", "prod_branch"], "tracker": ["provider", "team", "ticket_prefix"]}
 BASELINE_OFF_LIMITS = [".env*", "*.key", "*.pem", "credentials.json",
                        ".claude/settings*", ".github/workflows/**"]
@@ -131,6 +132,18 @@ def check(data):
     build = data.get("build")
     if isinstance(build, dict) and "cap_per_pass" in build:
         _check_ceiling(errors, "build", "cap_per_pass", build["cap_per_pass"])
+
+    # blog (optional) — enables cleanup's blog-proposal step. Its skill/posts_dir/
+    # publish values, when present, must be non-empty strings. Omitting `publish`
+    # means "no publish command" (cleanup never publishes on its own regardless).
+    blog = data.get("blog")
+    if blog is not None:
+        if not isinstance(blog, dict):
+            errors.append("blog must be a mapping")
+        else:
+            for field in ("skill", "posts_dir", "publish"):
+                if field in blog and not _nonempty_str(blog[field]):
+                    errors.append("blog.%s must be a non-empty string" % field)
 
     # schedule.window format.
     schedule = data.get("schedule")

@@ -79,6 +79,21 @@ The tracker is a swappable adapter — skills speak canonical verbs
 today). All state/label names come from `tracker.roles`, never hardcoded. See
 [`tracker-adapters.md`](tracker-adapters.md).
 
+**Optional `blog:` section.** Set it to opt the `cleanup` skill into an offer to
+turn a sharp session learning into one local draft — off unless present:
+
+```
+blog:
+  skill: blog-from-session      # repo-local skill to invoke (falls back to the bundled blog-from-session)
+  posts_dir: docs/blog          # where the bundled skill writes drafts (default: docs/blog/)
+  publish: ""                   # optional publish command; cleanup NEVER runs it unprompted
+```
+
+`skill`/`posts_dir`/`publish` are each optional (validated as non-empty strings
+when present). With no `blog:` section, `cleanup` never mentions a post; even with
+it, the skill only ever writes ONE draft file locally — it never publishes,
+commits, or pushes. See [`../skills/blog-from-session/`](../skills/blog-from-session/).
+
 ## Distribution
 
 Two shapes, one framework:

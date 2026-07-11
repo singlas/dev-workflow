@@ -41,6 +41,9 @@ dev-workflow/dw-config.py dev-workflow.yml <dotted.path> [default]`:
   commits (Step 3).
 - `tracker.roles.done.state` — the state completed tickets move to.
   `tracker.roles.exclude.labels` — never auto-close a ticket carrying one.
+- `blog` (optional) — when this section is present, the blog offer (Step 8) is
+  live: `blog.skill` names the skill to invoke (fallback: the bundled
+  `blog-from-session`). Absent → skip Step 8 entirely.
 
 Tracker access is through the canonical verbs (`get_ticket`, `move`, `comment`,
 `link_pr`, …) in `dev-workflow/tracker-adapters.md`. Ticket keys below use
@@ -197,7 +200,25 @@ branch completed to `tracker.roles.done.state`.
 4. **`move` the completed ones** to `tracker.roles.done.state`.
 5. If no keys surface anywhere, say "No tickets referenced — nothing to close."
 
-## Step 8: Session handoff (last output)
+## Step 8: Blog offer — optional, default SKIP
+
+**Default: skip, and say nothing.** This step exists ONLY when the repo's
+`dev-workflow.yml` has a `blog:` section AND the session produced an obviously
+sharp, non-obvious learning — a technique that worked, a gotcha with a real fix, a
+decision worth explaining. Routine work, a plain bug fix, or "shipped a thing" is
+**not** it.
+
+When both hold: name the learning in **one line** and ask —
+
+> "This looks like a post about `<X>` — want me to write it?"
+
+On **yes**, invoke the skill named in `blog.skill` (fallback: the bundled
+`blog-from-session`), which writes ONE local draft and stops. On **no** (or no
+answer), continue to handoff. **Never manufacture an angle** just to have
+something to offer, and **never auto-write** — the offer is the whole action here;
+the human's yes is what triggers the draft.
+
+## Step 9: Session handoff (last output)
 
 End with a compact **session handoff** so a fresh session can pick up cold:
 

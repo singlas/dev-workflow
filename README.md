@@ -48,7 +48,8 @@ enumerated in [`skills/ticket-loop/env.example`](skills/ticket-loop/env.example)
    claude --plugin-dir <path-to-this-clone>
    ```
 
-   It provides `/standup`, `/cleanup`, `/release`, and `/ticket-loop`.
+   It provides `/standup`, `/cleanup`, `/release`, `/ticket-loop`, and
+   `/blog-from-session`.
 
 2. **Add a config.** Copy [`dev-workflow.example.yml`](dev-workflow/dev-workflow.example.yml)
    to your repo root as `dev-workflow.yml` and edit the values (branch model,
@@ -77,6 +78,7 @@ commands — and each sits one step further up a deliberate safety gradient:
 | `/cleanup` | Closes a session: commit what's left → sync with the base branch → push → open the PR → move the session's finished tickets to Done | Pushes *your feature branch*; merging its PR lands on the base branch and **never deploys** |
 | `/release` | The promotion: absorb hotfixes, test gate, bump `version.file`, tag, open the base→prod PR — then **stops. A human merges; the merge deploys.** Refuses to run at all if `repo.prod_branch` / `deploy.trigger` aren't configured | The **only** skill that touches prod, and it's human-gated at the merge |
 | `/ticket-loop` | One pass of the autonomous agent: daily digest → drain the Telegram group (answers, new tickets, approvals) → babysit open PRs → build the next actionable tickets, one PR each | Same baseline guardrails as the containerized runner |
+| `/blog-from-session` | Optional: turns a sharp session learning (or a topic you hand it) into one practitioner field-note draft — proposes angles, then writes the pick. Enabled by a `blog:` config section; `/cleanup` can offer it | Writes one draft file locally; never publishes or commits |
 
 ### Autonomous ticket-loop
 
