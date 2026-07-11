@@ -82,12 +82,16 @@ commands — and each sits one step further up a deliberate safety gradient:
 
 ### Autonomous ticket-loop
 
-The loop runs the same framework unattended, on a timer, in a container:
+The loop runs the same framework unattended, on a timer, in a container — or
+natively via macOS launchd when you'd rather skip the container:
 
 - **The agent** — what it does and how you manage it from a group chat:
   [`skills/ticket-loop/README.md`](skills/ticket-loop/README.md)
 - **The Docker runner** — build the image, mount your work tree, set the timer:
   [`skills/ticket-loop/docker/README.md`](skills/ticket-loop/docker/README.md)
+- **Native (macOS launchd)** — a laptop or dedicated Mac mini, no container
+  tooling, same runner:
+  [`skills/ticket-loop/README.md`](skills/ticket-loop/README.md#run-natively-macos-launchd--laptop-or-a-dedicated-mac-mini)
 
 ## 2. How it's put together
 

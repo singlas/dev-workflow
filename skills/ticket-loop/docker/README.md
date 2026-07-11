@@ -116,9 +116,10 @@ Telegram poll succeeded before enabling the timer.
 ## Try it locally first
 
 Before you touch a server, validate the WHOLE loop on your laptop — same image,
-same volume shape, same runner, just local Docker. [`local-run.sh`](local-run.sh)
-is a thin helper around the exact commands above; each subcommand is independently
-runnable. The recommended rollout:
+same volume shape, same runner, just local Docker. (No Docker? The native launchd
+mode in the skill [README](../README.md) trials the same runner directly.)
+[`local-run.sh`](local-run.sh) is a thin helper around the exact commands above;
+each subcommand is independently runnable. The recommended rollout:
 
 ```
 export CLAUDE_PIN=<pin>                              # same pin as the box build

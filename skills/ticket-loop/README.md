@@ -95,6 +95,53 @@ build (with a required `CLAUDE_CODE_VERSION` pin), seed the volume, write
 `agent.env`, and render the `agent.service`/`agent.timer` templates. Secrets stay on
 the volume (never baked, never in `docker inspect`).
 
+### Run natively (macOS launchd) — laptop or a dedicated Mac mini
+
+Same runner and skills as the container, minus the container. `install-cron.sh` grows
+an **external-runner** mode: instead of a checkout driving its own `cron-run.sh`, the
+LaunchAgent runs the *framework's* `run-pass.sh` against a **separate** target repo —
+the runner lives outside the work tree it drives (the read-only-runner property the
+container gets from boundary rule 2, on bare macOS).
+
+- **Native** when you don't want container tooling on the machine — a laptop trialling
+  the loop, or a dedicated Mac mini. Add `--opt` to copy the runner + plugin root-owned
+  to `/opt/dev-workflow` so the agent's own account can't edit its leash (this keeps the
+  read-only-runner property; without it the plist points at your clone, which the agent
+  user could modify).
+- **Docker** when you want hard isolation — a non-root user, dropped capabilities, and a
+  read-only rootfs with the work tree as the only writable mount. Reach for it on a
+  shared or exposed host.
+
+Worked example (framework clone drives a separate target repo, hardened):
+
+```
+git clone https://github.com/singlas/dev-workflow ~/dev-workflow
+~/dev-workflow/skills/ticket-loop/install-cron.sh \
+  --work-tree ~/repos/your-repo --env-file ~/.config/dev-workflow/agent.env \
+  --opt --mcp-keyed
+```
+
+`--work-tree` is the repo the loop builds against (must be a git checkout with a
+`dev-workflow.yml` at its root). `--env-file` is the `agent.env` secrets file
+`run-pass.sh` sources (mode `600`; it's warned about, never printed). `--mcp-keyed`
+wires the keyed tracker MCP so Linear needs a static `LINEAR_API_KEY` instead of a
+browser OAuth — required on any headless box. `--refresh`/`--uninstall` work as in the
+legacy mode; with no new flags the script is byte-for-byte its old in-tree self.
+
+**Dedicated Mac mini.** For an always-on agent host:
+
+- Run it under a **separate macOS user** created just for the agent — its home holds the
+  clone, the `agent.env`, and `~/.claude` auth, nothing of yours.
+- Authenticate headlessly: `claude setup-token` once, then put the resulting
+  `CLAUDE_CODE_OAUTH_TOKEN` in the env file. With `--mcp-keyed` there's **no browser
+  step** anywhere in the loop.
+- Keep it awake: System Settings → Energy Saver → *Prevent automatic sleeping*, or wrap
+  the schedule with `caffeinate -s`. A sleeping Mac fires no LaunchAgent.
+- **One loop at a time, anywhere.** The pid lock (`loop-lock.sh`) is local — it can't
+  arbitrate across machines. Install **exactly one** schedule per repo across every host
+  (laptop + mini included); two schedules on the same board double-drain Telegram and
+  double-build.
+
 ### Install as a Claude Code plugin
 
 `ticket-loop` ships inside the **`dev-workflow`** plugin (manifest at
