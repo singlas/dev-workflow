@@ -73,7 +73,9 @@ RUN chmod -R 755 /opt/dev-workflow \
 
 # Non-root agent user. Its home (/home/agent) is where the persistent volume mounts:
 # ~/.claude (auth), the work-tree checkout, agent.env, state.json, .venv.
-RUN useradd --create-home --shell /bin/bash --uid 10001 agent
+# Absolute path: the ENV PATH above deliberately omits /usr/sbin (the agent user
+# never needs admin tools), so bare `useradd` is not found at build time.
+RUN /usr/sbin/useradd --create-home --shell /bin/bash --uid 10001 agent
 USER agent
 WORKDIR /home/agent
 
