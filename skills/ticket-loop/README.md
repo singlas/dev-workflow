@@ -198,6 +198,14 @@ back to the current repo's `.env`. Target-repo skills should call `dw-telegram`
 the symlink isn't installed) — don't vendor a copy of the bridge into each repo;
 copies drift.
 
+## Multi-project: the orchestrator
+
+One always-on box working N boards under a single round-robin scheduler with
+an adaptive pre-check + backoff cadence — `orchestrator/README.md`. Additive:
+everything above (interactive `/loop`, the cron/launchd timer, the one-shot
+container) stays exactly as documented; fold a project into the orchestrator
+and decommission ONLY that project's individual timer.
+
 ## The group-chat grammar
 
 | You type in Telegram | What happens |

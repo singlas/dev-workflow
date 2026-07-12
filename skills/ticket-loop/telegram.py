@@ -13,6 +13,8 @@ Subcommands:
                                       Photos (and image documents) are downloaded to
                                       <repo>/.agent-loop/media/<message_id>.<ext>; `media_path` carries
                                       the local path (null for text-only messages), `text` the caption.
+  peek                                Count pending human messages WITHOUT consuming the
+                                      getUpdates offset (read-only; the orchestrator pre-check).
   send-photo [--ticket ABC-123] [--caption TEXT] <path>
                                       Send an image file to the agent group; prints {"message_id": N}.
   send-document [--caption TEXT] <path>
@@ -245,6 +247,32 @@ def cmd_poll(args: argparse.Namespace) -> None:
     save_state(state)
     for line in emitted:
         print(json.dumps(line, ensure_ascii=False))
+
+
+def cmd_peek(_args: argparse.Namespace) -> None:
+    """Read-only look at pending updates WITHOUT consuming them: getUpdates at the
+    stored offset, timeout 0, and NO state write — the offset is untouched, so the
+    next real `poll` still sees every message. Prints the count of human messages
+    in the agent group. Used by the orchestrator pre-check to catch a human poke
+    ("stop", "urgent: X") on an otherwise idle project; safe by construction ONLY
+    while a single consumer drives this bot (the orchestrator, after any per-project
+    cron is decommissioned)."""
+    chat_id = require_env("AGENT_TELEGRAM_CHAT_ID")
+    state = load_state()
+    updates = api(
+        "getUpdates",
+        {"offset": state.get("offset", 0), "timeout": 0, "allowed_updates": '["message"]'},
+        http_timeout=15,
+    )
+    count = 0
+    for update in updates:
+        msg = update.get("message")
+        if not msg or str(msg.get("chat", {}).get("id")) != chat_id:
+            continue
+        if (msg.get("from") or {}).get("is_bot"):
+            continue
+        count += 1
+    print(count)
 
 
 def cmd_send_photo(args: argparse.Namespace) -> None:
@@ -485,6 +513,9 @@ def main() -> None:
     p_poll = sub.add_parser("poll", help="fetch new messages from the agent group")
     p_poll.add_argument("--timeout", type=int, default=25, help="long-poll seconds (0 = instant)")
     p_poll.set_defaults(func=cmd_poll)
+
+    p_peek = sub.add_parser("peek", help="count pending group messages WITHOUT consuming the offset")
+    p_peek.set_defaults(func=cmd_peek)
 
     p_photo = sub.add_parser("send-photo", help="send an image file to the agent group")
     p_photo.add_argument("--ticket", help="issue key this image belongs to (records reply matching)")

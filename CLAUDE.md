@@ -18,11 +18,14 @@ dev-workflow/
 │   ├── dev-workflow.example.yml  # annotated full config (generic values)
 │   ├── validate.py          # schema + tighten-only validator (PyYAML)
 │   ├── dw-config.py          # dotted-path config reader for shell callers
+│   ├── queue-count.py       # Linear queue-depth pre-check (queue_count verb)
 │   ├── test_validate.py     # unittest for validate.py
 │   └── tracker-adapters.md  # canonical verbs → provider mapping (Linear impl)
 ├── skills/                  # Claude Code plugin skills — standup, cleanup, release, ticket-loop
 │   ├── standup/  cleanup/  release/   # session skills, driven by dev-workflow.yml
 │   └── ticket-loop/         # autonomous agent + docker/ runner packaging
+│       └── orchestrator/    # multi-project round-robin scheduler (roster.yml,
+│                            #   adaptive pre-check + backoff, over the same runner)
 ├── dev-process/             # The narrative playbook behind the skills
 │   ├── README.md            # branch model, worktrees, GitHub setup, daily loop, agent loop
 │   └── scripts/             # worktree-reset.sh, ship-preflight.sh (ready to copy)
@@ -73,4 +76,6 @@ dev-workflow/
   and the tracker-adapter seam. Keep names in sync with the ticket-loop runner
   (`skills/ticket-loop/`) and the `.claude-plugin/plugin.json` (plugin name
   `dev-workflow`). New Python here must pass `python3 -m py_compile`; the
-  validator has a `test_validate.py` (`python3 dev-workflow/test_validate.py`)
+  validator has a `test_validate.py` (`python3 dev-workflow/test_validate.py`);
+  the orchestrator brain and pre-check have `skills/ticket-loop/orchestrator/test_orch.py`
+  and `dev-workflow/test_queue_count.py` (same `python3 <file>` idiom)

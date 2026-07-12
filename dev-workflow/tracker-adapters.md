@@ -26,6 +26,7 @@ whose boards use different words.
 | `label` / `unlabel` (label-role) | ticket key, **label role** (`queue`, `blocked`, an `exclude` label) | Add/remove a role's label, resolved to the board's label name. E.g. set `blocked` when a ticket needs a human; clear `queue` when done. |
 | `link_pr` | ticket key, PR URL | Attach the opened PR to the ticket so the two are cross-referenced. |
 | `get_blockers` | ticket key (`ABC-123`) | The tickets this one is **blocked by** — its upstream dependencies. Returns each blocker's key and current state, so a loop can check whether every blocker has reached `roles.done.state` before building the dependent ticket. Read-only; used at triage to sequence dependent work. |
+| `queue_count` | `roles.queue` (label + states), `roles.exclude.labels` | Read-only count of `list_actionable`'s result set — the orchestrator's cheap pre-check. MUST share `list_actionable`'s eligibility definition (same roles, same exclude filter) so the pre-check can never silently drift from what a pass would pick up. |
 
 ## Linear mapping (the implementation today)
 
@@ -43,6 +44,7 @@ not the key prefix). Names below in `roles.*` are read from `dev-workflow.yml`.
 | `label` / `unlabel` (label-role) | `mcp__linear__save_issue` | Update the issue's `labels` set — add/remove the name resolved from the role. |
 | `link_pr` | `mcp__linear__create_attachment` | Attach the PR URL to the issue. |
 | `get_blockers` | `mcp__linear__get_issue` (relations) | If the MCP returns the issue's `blocked-by` relations, use them directly. **Fallback convention** (relations not cheaply readable): parse a `Blocked by: ABC-###` line — comma-separated keys allowed — from the ticket description **at triage**; zero adapter work. Either path, `get_ticket` each blocker key to read its current state. |
+| `queue_count` | `dev-workflow/queue-count.py` (GraphQL over urllib, keyed by `LINEAR_API_KEY`) | Same filter as `list_actionable` (team + queue label + queue states, exclude labels dropped client-side); returns only the count. Not an MCP call — it must run without a Claude session. |
 
 **Linear MCP has no delete.** The strongest teardown is moving an issue to a
 `Canceled` state — never assume a hard delete exists. Anything the loop

@@ -218,5 +218,66 @@ class TestCmdQuestions(unittest.TestCase):
         self.assertEqual(self.read_state(), before)  # no write on no-match
 
 
+class TestCmdPeek(unittest.TestCase):
+    """`peek` must count pending human messages WITHOUT consuming the offset —
+    save_state is monkeypatched to a hard failure."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.state_path = Path(self._tmp.name) / "state.json"
+        self._orig_state_path = telegram.STATE_PATH
+        telegram.STATE_PATH = self.state_path
+        self.state_path.write_text(json.dumps({"offset": 100, "questions": {}}))
+        self._orig_api = telegram.api
+        self._orig_save = telegram.save_state
+        telegram.save_state = self._no_save
+        os.environ["AGENT_TELEGRAM_CHAT_ID"] = "-100777"
+        self.api_params = None
+
+    def tearDown(self):
+        telegram.STATE_PATH = self._orig_state_path
+        telegram.api = self._orig_api
+        telegram.save_state = self._orig_save
+        os.environ.pop("AGENT_TELEGRAM_CHAT_ID", None)
+        self._tmp.cleanup()
+
+    def _no_save(self, *a, **k):
+        raise AssertionError("peek must never write state (offset consumed!)")
+
+    def fake_api(self, updates):
+        def _api(method, params, **kw):
+            self.assertEqual(method, "getUpdates")
+            self.api_params = params
+            return updates
+        telegram.api = _api
+
+    def run_peek(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            telegram.cmd_peek(argparse.Namespace())
+        return buf.getvalue().strip()
+
+    def msg(self, chat="-100777", bot=False):
+        return {"update_id": 101, "message": {
+            "message_id": 5, "chat": {"id": int(chat)},
+            "from": {"is_bot": bot, "username": "u"}, "text": "hi"}}
+
+    def test_counts_human_messages_at_stored_offset(self):
+        self.fake_api([self.msg(), self.msg()])
+        self.assertEqual(self.run_peek(), "2")
+        self.assertEqual(self.api_params["offset"], 100)  # peeks AT the offset
+        self.assertEqual(self.api_params["timeout"], 0)
+        # state untouched on disk
+        self.assertEqual(json.loads(self.state_path.read_text())["offset"], 100)
+
+    def test_ignores_bots_and_other_chats(self):
+        self.fake_api([self.msg(bot=True), self.msg(chat="-42"), self.msg()])
+        self.assertEqual(self.run_peek(), "1")
+
+    def test_empty(self):
+        self.fake_api([])
+        self.assertEqual(self.run_peek(), "0")
+
+
 if __name__ == "__main__":
     unittest.main()

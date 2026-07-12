@@ -1,0 +1,264 @@
+#!/bin/bash
+# Long-lived round-robin orchestrator over N ticket-loop projects (mode axis:
+# multi-project; Approach A). It replaces the SCHEDULER, not the runner: each
+# turn shells out to the same run-pass.sh → cron-run.sh → `claude -p
+# /ticket-loop` chain the single-project timer shapes use, one pass at a time,
+# never two. All scheduling state/math (roster, ladder, windows, write-ahead,
+# classification) lives in orch.py next to this script; this file owns process
+# concerns: PID-1 signal handling, the per-pass process-group timeout, the
+# pre-check commands (which need each project's own secrets), and Telegram
+# escalation.
+#
+# Secret scoping: this process holds NO project secrets. Each pass — and each
+# pre-check — runs in a child that sources only that project's env file; the
+# orchestrator's own env carries at most the OPS alert channel creds.
+#
+# stdout is the live dashboard: one decision line per turn (`docker logs -f`).
+#
+# Env:
+#   ORCH_ROSTER              roster.yml           (default /home/agent/roster.yml)
+#   ORCH_STATE_DIR           orch state dir       (default <roster dir>/orch)
+#   ORCH_RUN_PASS            per-pass runner override (tests; default sibling run-pass.sh)
+#   ORCH_MAX_TURNS           exit after N turns   (tests; default: run forever)
+#   ORCH_TELEGRAM_BOT_TOKEN / ORCH_TELEGRAM_CHAT_ID   optional ops alert channel
+#   TICKET_LOOP_MCP_CONFIG / DW_PLUGIN_DIR / DW_PYTHON  forwarded to each pass when set
+#
+# Control surface: `touch <ORCH_STATE_DIR>/run-now` (optionally echo a project
+# name into it) forces the next turn to run that project, pre-check bypassed.
+set -uo pipefail
+
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Sibling discovery covers both layouts: repo (orchestrator/ under
+# skills/ticket-loop/, queue-count.py in dev-workflow/) and image (flat
+# /opt/dev-workflow/bin).
+find_sibling() {
+  local f
+  for f in "$HERE/$1" "$HERE/../$1" "$HERE/../../../dev-workflow/$1"; do
+    [ -f "$f" ] && { echo "$f"; return 0; }
+  done
+  return 1
+}
+ORCH_PY="$HERE/orch.py"
+RUN_PASS="${ORCH_RUN_PASS:-$(find_sibling run-pass.sh || true)}"
+TELEGRAM="$(find_sibling telegram.py || true)"
+QUEUE_COUNT="$(find_sibling queue-count.py || true)"
+LOCK_SH="$(find_sibling loop-lock.sh || true)"
+
+ROSTER="${ORCH_ROSTER:-/home/agent/roster.yml}"
+ORCH_STATE_DIR="${ORCH_STATE_DIR:-$(dirname "$ROSTER")/orch}"
+mkdir -p "$ORCH_STATE_DIR"
+STATE_FILE="$ORCH_STATE_DIR/orch-state.json"
+RUN_NOW_FILE="$ORCH_STATE_DIR/run-now"
+
+# Python runner for orch.py (PEP 723 pyyaml): same dance as cron-run.sh.
+if [ -n "${DW_PYTHON:-}" ]; then PY="$DW_PYTHON"
+elif command -v uv >/dev/null 2>&1; then PY="uv run --quiet --no-project"
+else PY="python3"; fi
+
+ts()  { date '+%Y-%m-%d %H:%M:%S %Z'; }
+log() { echo "[$(ts)] $*"; }
+
+ops_alert() {
+  log "OPS: $*"
+  if [ -n "${ORCH_TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${ORCH_TELEGRAM_CHAT_ID:-}" ] \
+     && [ -n "$TELEGRAM" ]; then
+    TELEGRAM_BOT_TOKEN="$ORCH_TELEGRAM_BOT_TOKEN" \
+    AGENT_TELEGRAM_CHAT_ID="$ORCH_TELEGRAM_CHAT_ID" \
+    TICKET_LOOP_STATE_DIR="$ORCH_STATE_DIR" \
+      python3 "$TELEGRAM" send "🚨 orchestrator: $*" >/dev/null 2>&1 \
+      || log "WARN: ops alert failed to send"
+  fi
+}
+
+project_alert() {  # $1 env_file, $2 state_dir, $3 message — the project's own bot
+  [ -n "$TELEGRAM" ] || return 0
+  ( set -a; . "$1"; set +a
+    TICKET_LOOP_STATE_DIR="$2" python3 "$TELEGRAM" send "$3" ) >/dev/null 2>&1 \
+    || log "WARN: project alert failed to send"
+}
+
+# PID-1 discipline (supervision §4): run the container with --init; on SIGTERM
+# finish (or timeout-kill) the current pass, persist, exit — never leave a live
+# claude mid-ticket. bash runs the trap only between commands, so every wait
+# below is chunked ≤5s.
+DRAIN=0
+trap 'DRAIN=1; log "SIGTERM — draining (current pass finishes or hits its timeout)"' TERM INT
+
+# setsid puts each pass in its own session/process group so a timeout can kill
+# the whole tree (supervision §1). Linux/Docker (the deploy target) always has
+# it; some dev hosts (macOS) do not — fall back to a plain background child and
+# a single-PID kill there so the driver still runs end to end.
+if command -v setsid >/dev/null 2>&1; then SETSID="setsid"; else SETSID=""; fi
+
+# Run "$@" in its own session/process group; TERM the whole group after $1
+# seconds, KILL 30s later (supervision §1 — a wedged MCP must not freeze the fleet).
+run_with_timeout() {
+  local limit="$1"; shift
+  $SETSID "$@" &
+  local pid=$!
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 5
+    waited=$((waited + 5))
+    if [ "$waited" -ge "$limit" ]; then
+      log "pass timeout (${limit}s) — killing process group $pid"
+      if [ -n "$SETSID" ]; then
+        kill -TERM -- "-$pid" 2>/dev/null
+        sleep 30
+        kill -KILL -- "-$pid" 2>/dev/null
+      else
+        kill -TERM "$pid" 2>/dev/null
+        sleep 30
+        kill -KILL "$pid" 2>/dev/null
+      fi
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+  done
+  wait "$pid"
+}
+
+sleep_interruptible() {  # wake early on drain or a run-now touch
+  local remain="$1" chunk
+  while [ "$remain" -gt 0 ]; do
+    [ "$DRAIN" = 1 ] && return 0
+    [ -f "$RUN_NOW_FILE" ] && return 0
+    chunk=$(( remain > 30 ? 30 : remain ))
+    sleep "$chunk"
+    remain=$(( remain - chunk ))
+  done
+}
+
+# ── startup: roster validation (marker guard §8), crash write-ahead recovery
+#    (§3), lock-clear on boot (§5 — we are PID 1, no pass can be live) ─────────
+if ! STARTUP_SH="$($PY "$ORCH_PY" startup --sh --roster "$ROSTER" --state "$STATE_FILE")"; then
+  ops_alert "startup failed — roster invalid or work-tree guard tripped; refusing to run"
+  sleep 60   # keep `--restart unless-stopped` from hot-looping on a config error
+  exit 1
+fi
+eval "$STARTUP_SH"
+[ -n "${CRASH_RECOVERED:-}" ] && log "recovered crash write-ahead: died mid-pass on $CRASH_RECOVERED"
+[ -n "${LOCKS_CLEARED:-}" ]   && log "cleared stale lock(s): $LOCKS_CLEARED"
+[ -n "${ESCALATE_OPS:-}" ]    && ops_alert "$ESCALATE_OPS"
+if [ -z "$RUN_PASS" ]; then
+  ops_alert "run-pass.sh not found next to orchestrator.sh — cannot run passes"
+  exit 1
+fi
+log "orchestrator up — roster: ${PROJECTS:-?}"
+
+TURN=0
+while :; do
+  TURN=$((TURN + 1))
+  if [ -n "${ORCH_MAX_TURNS:-}" ] && [ "$TURN" -gt "$ORCH_MAX_TURNS" ]; then
+    log "ORCH_MAX_TURNS=$ORCH_MAX_TURNS reached — exiting (test mode)"
+    exit 0
+  fi
+  [ "$DRAIN" = 1 ] && { log "drained — exiting"; exit 0; }
+
+  RUN_NOW_ARGS=()
+  if [ -f "$RUN_NOW_FILE" ]; then
+    RUN_NOW_ARGS=(--run-now "$(head -1 "$RUN_NOW_FILE" 2>/dev/null | tr -d '[:space:]')")
+  fi
+  if ! DECISION_SH="$($PY "$ORCH_PY" next --sh --roster "$ROSTER" --state "$STATE_FILE" \
+                       ${RUN_NOW_ARGS[@]+"${RUN_NOW_ARGS[@]}"})"; then
+    log "WARN: orch.py next failed — retrying in 60s"
+    sleep 60
+    continue
+  fi
+  eval "$DECISION_SH"
+  [ "${CONSUME_RUN_NOW:-0}" = 1 ] && rm -f "$RUN_NOW_FILE"
+
+  if [ "$ACTION" = "sleep" ]; then
+    log "sleep ${SLEEP_S}s — $REASON"
+    sleep_interruptible "$SLEEP_S"
+    continue
+  fi
+
+  # ACTION=run → PROJECT WORK_TREE ENV_FILE STATE_DIR MODEL PROJECT_TZ CADENCE
+  #              PRECHECK FORCE_FULL TIMEOUT_S
+  record() {  # $1 = outcome class
+    local RECORD_SH
+    if ! RECORD_SH="$($PY "$ORCH_PY" record --sh --roster "$ROSTER" \
+                       --state "$STATE_FILE" --project "$PROJECT" --outcome "$1")"; then
+      log "WARN: record failed for $PROJECT ($1)"
+      return 1
+    fi
+    eval "$RECORD_SH"
+    log "turn $PROJECT: outcome=$1 next_eligible=${NEXT_ELIGIBLE:-?}"
+    [ -n "${ESCALATE_PROJECT:-}" ] && project_alert "$ENV_FILE" "$STATE_DIR" "$ESCALATE_PROJECT"
+    [ -n "${ESCALATE_OPS:-}" ] && ops_alert "$PROJECT: $ESCALATE_OPS"
+    return 0
+  }
+
+  # An interactive `/loop` session holding this project's singleton lock is
+  # being actively worked — requeue shortly, never a dry pass (§5).
+  if [ -n "$LOCK_SH" ] && TICKET_LOOP_STATE_DIR="$STATE_DIR" bash "$LOCK_SH" status >/dev/null 2>&1; then
+    log "$PROJECT: singleton lock held (interactive session?) — requeue"
+    record skipped-lock
+    continue
+  fi
+
+  if [ "${PRECHECK:-0}" = 1 ]; then
+    # Cheap pre-check (spec §3): queue depth + open questions + read-only peek.
+    # queue-count failures FAIL OPEN (run the pass — it is the source of truth,
+    # and a real outage then surfaces as a loud error class, not a silent skip).
+    SIGNAL=0 WHY="no work signal"
+    QC="$( ( set -a; . "$ENV_FILE"; set +a
+             python3 "$QUEUE_COUNT" --config "$WORK_TREE/dev-workflow.yml" ) 2>&1 )"
+    case "$QC" in
+      0)           : ;;
+      ''|*[!0-9]*) SIGNAL=1; WHY="queue-count failed, failing open: ${QC:0:120}" ;;
+      *)           SIGNAL=1; WHY="queue depth $QC" ;;
+    esac
+    if [ "$SIGNAL" = 0 ] && [ -n "$TELEGRAM" ]; then
+      QN="$(TICKET_LOOP_STATE_DIR="$STATE_DIR" python3 "$TELEGRAM" questions --json 2>/dev/null \
+            | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)"
+      case "$QN" in (*[!0-9]*|'') QN=0 ;; esac
+      [ "$QN" -gt 0 ] && { SIGNAL=1; WHY="$QN open question(s) — a human may have answered"; }
+    fi
+    if [ "$SIGNAL" = 0 ] && [ -n "$TELEGRAM" ]; then
+      PK="$( ( set -a; . "$ENV_FILE"; set +a
+               TICKET_LOOP_STATE_DIR="$STATE_DIR" python3 "$TELEGRAM" peek ) 2>/dev/null || echo 0 )"
+      case "$PK" in (*[!0-9]*|'') PK=0 ;; esac
+      [ "$PK" -gt 0 ] && { SIGNAL=1; WHY="$PK unread group message(s)"; }
+    fi
+    if [ "$SIGNAL" = 0 ]; then
+      log "pre-check $PROJECT: idle (queue 0, no questions, no pokes) — skipping pass"
+      record precheck-idle
+      continue
+    fi
+    log "pre-check $PROJECT: $WHY — running pass"
+  else
+    FF_NOTE=""
+    [ "${FORCE_FULL:-0}" = 1 ] && FF_NOTE="forced-full, "
+    log "pass $PROJECT: no pre-check (${FF_NOTE}cadence=$CADENCE)"
+  fi
+
+  # Crash write-ahead BEFORE launch (§3).
+  $PY "$ORCH_PY" pass-start --roster "$ROSTER" --state "$STATE_FILE" \
+    --project "$PROJECT" >/dev/null 2>&1 \
+    || log "WARN: could not persist pass-start write-ahead"
+
+  # Minimal, project-scoped child env (spec §5): the pass sources its own
+  # agent.env via DW_ENV_FILE; nothing from any other project leaks in.
+  ENV_ARGS=( HOME="$HOME" PATH="$PATH" LANG="${LANG:-C.UTF-8}"
+             DW_ENV_FILE="$ENV_FILE" DW_WORK_TREE="$WORK_TREE"
+             TICKET_LOOP_STATE_DIR="$STATE_DIR" )
+  [ -n "${MODEL:-}" ]                  && ENV_ARGS+=( TICKET_LOOP_MODEL="$MODEL" )
+  [ -n "${PROJECT_TZ:-}" ]             && ENV_ARGS+=( TICKET_LOOP_TZ="$PROJECT_TZ" )
+  [ -n "${TICKET_LOOP_MCP_CONFIG:-}" ] && ENV_ARGS+=( TICKET_LOOP_MCP_CONFIG="$TICKET_LOOP_MCP_CONFIG" )
+  [ -n "${DW_PLUGIN_DIR:-}" ]          && ENV_ARGS+=( DW_PLUGIN_DIR="$DW_PLUGIN_DIR" )
+
+  run_with_timeout "$TIMEOUT_S" env -i "${ENV_ARGS[@]}" "$RUN_PASS"
+  RC=$?
+  TO_ARGS=()
+  [ "$RC" -eq 124 ] && TO_ARGS=(--timed-out)
+  CLASSIFY_OUT="$($PY "$ORCH_PY" classify --state-dir "$STATE_DIR" --rc "$RC" \
+                   ${TO_ARGS[@]+"${TO_ARGS[@]}"} 2>/dev/null)" \
+    || CLASSIFY_OUT="error classify itself failed"
+  CLASS="${CLASSIFY_OUT%% *}"
+  log "classify $PROJECT: $CLASSIFY_OUT"
+  record "$CLASS"
+done

@@ -597,6 +597,35 @@ off) and the sweep simply waits for the next one — dead simple, no catch-up.
 
   Both halves empty ⇒ omit the section.
 
+## Pass outcome line (read by the orchestrator)
+
+**Last act of EVERY pass — even a fully idle one, and also under `--dry-run` /
+`--report`:** write a one-line JSON summary to
+`$TICKET_LOOP_STATE_DIR/outcome.json` (the runner exports
+`TICKET_LOOP_STATE_DIR`; default `.agent-loop/`). The multi-project
+orchestrator classifies the pass from this file — productive / dry /
+waiting-on-human — to set this project's next wake time. The runner deletes any
+stale file before the pass starts, so a missing file makes the pass look idle
+and backs the project off: never skip writing it. One shell command:
+
+    printf '{"picked":%d,"pr_opened":%d,"asked":%d,"blocked":%d,"progressed":%s,"error":%s}\n' \
+      1 1 0 0 true null > "$TICKET_LOOP_STATE_DIR/outcome.json"
+
+All six keys, every time:
+
+- `picked` — tickets taken into a build this pass (step 5 started).
+- `pr_opened` — PRs opened this pass.
+- `asked` — clarifying questions / plans sent (step 4's not-confident path).
+- `blocked` — tickets given the **blocked** label this pass.
+- `progressed` — `true` if any ticket otherwise genuinely advanced: a merge
+  closed a ticket (2a), review feedback was addressed (2b), a conflict healed
+  (2c), an answer was drained and a ticket unblocked (step 1), a ticket was
+  created from a group report. Triage/comment-only advancement counts — this is
+  what stops real-but-PR-less work from reading as a dry pass.
+- `error` — `null` normally; a short string when the pass aborted on a
+  loop-level failure (tracker MCP or Telegram down) — the orchestrator
+  escalates it instead of treating the pass as dry.
+
 ## Loop-level failure
 
 If the tracker MCP or Telegram is down: attempt one Telegram alert, then surface the

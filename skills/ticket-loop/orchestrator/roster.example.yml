@@ -1,0 +1,40 @@
+# roster.yml — the orchestrator's project list (the MODE axis: multi-project).
+# This file is orchestrator-owned deployment config; each repo's own contract
+# stays in its dev-workflow.yml, read per-pass, unchanged. Copy next to your
+# volume's work trees (default path: /home/agent/roster.yml) and edit.
+#
+# Work-tree guard (non-negotiable): every work_tree must live UNDER `root`
+# AND contain a `.dw-agent-clone` marker file (touch it when you seed the
+# clone). The orchestrator refuses to start otherwise — this is the positive
+# allowlist that keeps a live prod checkout from ever being reset --hard.
+
+root: /home/agent            # allowlist root; defaults to this file's directory
+
+# ── cadence axis (roster default; each project may override) ─────────────────
+cadence: adaptive            # adaptive = pre-check + backoff ladder; fixed = constant gap
+interval: 30m                # the constant gap used where cadence is `fixed`
+
+# ── adaptive tuning (defaults shown; all optional) ────────────────────────────
+ladder: [10m, 20m, 40m, 60m] # dry-pass backoff; productive resets to the first rung
+waiting_interval: 20m        # waiting-on-human cadence (neither ladder nor fast)
+force_full_every: 8h         # unconditional safety pass per project (drift guard)
+pass_timeout: 90m            # per-pass process-group timeout → classified error
+requeue_delay: 5m            # skipped-lock / low-memory requeue (no ladder advance)
+mem_floor_mb: 2560           # skip the turn when host MemAvailable is below this
+error_escalate_after: 3      # consecutive error passes before escalating
+crash_park_after: 3          # consecutive crashes before parking the project
+crash_park_for: 12h
+
+projects:
+  - name: niptao
+    work_tree: /home/agent/niptao        # dedicated agent clone — NEVER the prod checkout
+    env_file: /home/agent/niptao.env     # 600; LINEAR_API_KEY, GH_TOKEN (per-repo
+                                         # fine-grained PAT!), TELEGRAM_BOT_TOKEN,
+                                         # AGENT_TELEGRAM_CHAT_ID
+    state_dir: /home/agent/state/niptao  # state.json, loop.lock, logs, outcome.json
+    # model: sonnet                      # optional → TICKET_LOOP_MODEL for the pass
+    # tz: Asia/Kolkata                   # optional → TICKET_LOOP_TZ
+    # window: "09:00-20:00"              # optional; intersected (tighten-only) with
+                                         # the repo's own schedule.window
+    # cadence: fixed                     # optional per-project cadence override
+    # interval: 45m
