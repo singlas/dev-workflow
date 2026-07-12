@@ -20,7 +20,9 @@ ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}
 
 ENV DISABLE_AUTOUPDATER=1 \
     npm_config_update_notifier=false \
-    PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin
+    PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 # System toolchain. Adjust per target repo: git + gh (PRs), curl/ca-certs, jq,
 # python3 + python3-yaml (dw-config.py reads dev-workflow.yml), tzdata (ships
