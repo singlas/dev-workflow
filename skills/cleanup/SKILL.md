@@ -28,9 +28,10 @@ explicit authorization to push and open a PR.
 ## Per-repo configuration (`dev-workflow.yml`)
 
 Resolve every repo-specific value from `dev-workflow.yml` with
-`dw-config dev-workflow.yml <dotted.path> [default]`. (`dw-config` is on PATH in a
-consuming repo after a hardened install; from the framework checkout it is
-`uv run dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.)
+`dw-config dev-workflow.yml <dotted.path> [default]`. (Three ways to resolve it:
+on PATH in a consuming repo after a hardened install; as a plugin install,
+`uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" dev-workflow.yml <dotted.path>`;
+from a framework checkout, `uv run dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.)
 
 - `repo.base_branch` — the integration trunk every feature PR targets. Merging a
   PR into it does **not** deploy.

@@ -27,8 +27,9 @@ only local state is `state.json` in the loop's state dir (the Telegram offset, t
 **Read the repo's `dev-workflow.yml` at the target-repo root at the start of each
 pass** (a shell caller resolves one value with
 `dw-config dev-workflow.yml <dotted.path> [default]` — on PATH in a consuming repo
-after a hardened install, or `uv run dev-workflow/dw-config.py dev-workflow.yml
-<dotted.path>` from the framework checkout). It
+after a hardened install; `uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py"
+dev-workflow.yml <dotted.path>` as a plugin install; or `uv run
+dev-workflow/dw-config.py dev-workflow.yml <dotted.path>` from a framework checkout). It
 names everything repo-specific — **never hardcode these; resolve the role, then use
 the repo's own name:**
 

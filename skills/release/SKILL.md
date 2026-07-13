@@ -50,9 +50,10 @@ or `.github/workflows/**`.
 ## Per-repo configuration (`dev-workflow.yml`)
 
 Resolve every value from `dev-workflow.yml` with
-`dw-config dev-workflow.yml <dotted.path> [default]`. (`dw-config` is on PATH in a
-consuming repo after a hardened install; from the framework checkout it is
-`uv run dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.)
+`dw-config dev-workflow.yml <dotted.path> [default]`. (Three ways to resolve it:
+on PATH in a consuming repo after a hardened install; as a plugin install,
+`uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" dev-workflow.yml <dotted.path>`;
+from a framework checkout, `uv run dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.)
 
 - `repo.base_branch` — the trunk you release *from*. `repo.prod_branch` — the prod
   mirror you release *to* (**required**; refuse if unset).
@@ -188,12 +189,13 @@ the PR URL, and wait.
 Merging is the human's call. Once it's merged — they tell you, or you confirm with
 `gh pr view <num> --json state,mergedAt` — announce to `deploy.announce`. When it's
 `telegram`, use the bundled bridge (same one the loop uses) — installed on PATH as
-`dw-telegram` by the hardened installs, else the framework copy:
+`dw-telegram` by the hardened installs, else the plugin-root or framework copy:
 
 ```bash
 dw-telegram send "🚀 Released v<new> — <one-line theme>. <3-6 highlight bullets>"
-# fallback when the symlink isn't installed:
-#   python3 /opt/dev-workflow/bin/telegram.py send "…"   (or the framework clone's copy)
+# fallbacks when the symlink isn't installed:
+#   python3 "${CLAUDE_PLUGIN_ROOT}/skills/ticket-loop/telegram.py" send "…"   (plugin install)
+#   python3 /opt/dev-workflow/bin/telegram.py send "…"                        (hardened /opt, or the framework clone's copy)
 ```
 
 Write the highlights for the people reading the channel — what changed *for them*,

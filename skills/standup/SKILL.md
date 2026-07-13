@@ -28,9 +28,11 @@ Progress, don't open worktrees. Surface, recommend, then let the human pick.
 
 Everything repo-specific comes from `dev-workflow.yml` at the target-repo root —
 resolve a value with `dw-config dev-workflow.yml <dotted.path> [default]`.
-(`dw-config` is on PATH in a consuming repo after a hardened install; from the
-framework checkout it is `uv run dev-workflow/dw-config.py dev-workflow.yml
-<dotted.path>`.) Never hardcode a team, label, state, or command:
+(Three ways to resolve `dw-config`: on PATH in a consuming repo after a hardened
+install; as a plugin install, `uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py"
+dev-workflow.yml <dotted.path>`; from a framework checkout, `uv run
+dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.) Never hardcode a team,
+label, state, or command:
 
 - `board.snapshot` — the command that regenerates the board views (e.g. a
   tracker-export script). `board.views` — the directory it writes them to.
