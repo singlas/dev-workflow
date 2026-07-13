@@ -77,6 +77,21 @@ anything, edit the master in `.local/` and run `config` — that pushes it to th
 volume and restarts; the orchestrator re-reads the roster every turn and each
 pass re-sources its env file, so the change takes effect on the next cycle.
 
+**What a change actually requires** (three tiers — only one needs a restart):
+
+| You changed… | Read when | To apply |
+|---|---|---|
+| A project env file **in the volume** (`/home/agent/<p>.env`) | re-sourced at the **start of every pass** by `run-pass.sh` | nothing — the **next pass** picks it up |
+| `roster.yml` **in the volume** | re-read **every turn** by `orch.py next` | nothing — the **next turn**; `restart` to apply now + re-validate |
+| `orch.env` **in the volume** (ops bot, `DEFAULT_TELEGRAM_BOT_TOKEN`) | sourced **once at startup** | **`restart`** (or `deploy.sh restart`) |
+
+The masters in `.local/` (Mac **or** `~/dev-workflow/.local/` on the box) are read
+by **nothing at runtime** — they're the source-of-truth copies `config` pushes
+into the volume. Editing a `.local/` master alone changes nothing live until it's
+pushed to `/home/agent/…` in the volume. So "edit on the box" only takes effect
+if you edit the **volume** file (`docker run --user root … cat > /home/agent/<p>.env`),
+not the `~/dev-workflow/.local/` copy.
+
 **Pausing a project** (`enabled: false` in its roster entry): kept in the roster,
 its state preserved, its startup marker guard skipped, and the scheduler never
 picks it — a clean off-switch that also lets you *stage* a project (add the entry
@@ -414,12 +429,21 @@ The loop is tracker-driven; a project can't be round-robined until it has:
      single-owner rosters; isolated-per-container is the upgrade path.)
 5. The two env files (runbook §4), the DB fence if its tests need one (§5),
    the broker fence if it uses celery (§6).
-6. A dedicated clone on the volume + marker (§3), then append the roster entry:
+6. **Add it to the roster, the roster-driven way** (the `.local/` → `deploy.sh`
+   flow — see "Updating a live deployment"). In your local checkout:
+   - Add the entry to `.local/roster.yml` with `repo: { url, branch }` (HTTPS
+     url even for ssh repos), plus `work_tree`/`env_file`/`state_dir`. Stage it
+     `enabled: false` to add the entry *before* its clone exists.
+   - Fill `.local/<name>-agent.env` (loop secrets, runbook §4) and add its
+     manifest line to `.local/deploy-manifest`.
+   - `deploy.sh onboard` — pushes config, then clones the work tree from `repo`
+     + that project's `GH_TOKEN` (writes the `.dw-agent-clone` marker for you),
+     then restarts. Flip `enabled: true` + `deploy.sh config` when you're ready
+     to schedule it (uncomment its app-env manifest line first if it has one —
+     the clone dir now exists).
 
-       docker run --rm -v dw-agent:/home/agent dw-agent:<pin> cat /home/agent/roster.yml   # current
-       # append via the same `cat >` full-rewrite used in §4, then:
-       docker restart dw-orchestrator    # picks up the roster; drains first (SIGTERM)
-
+   Manual fallback (no deploy.sh): seed the clone (§3), `docker run … cat >
+   /home/agent/roster.yml` the full file, `docker restart dw-orchestrator`.
    Restart is the supported reload path (SIGHUP reload is deliberately
    deferred); boot lock-clear + crash recovery make it safe at any time.
 7. Dry-run the new project (§7) before trusting its first live turn.
