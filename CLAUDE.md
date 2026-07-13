@@ -7,7 +7,7 @@ Claude Code plugin read one per-repo `dev-workflow.yml` and work your board
 (pick up tickets, ask questions in team chat, open one reviewable PR each)
 inside guardrails a repo can tighten but never loosen. The framework leads;
 the original standalone AI-prompt collections (context files, audits,
-web-optimization, handover) still ship here as a secondary section.
+web-optimization, handover) are demoted to `extras/`.
 
 ## Repository Structure
 
@@ -29,27 +29,15 @@ dev-workflow/
 ├── dev-process/             # The narrative playbook behind the skills
 │   ├── README.md            # branch model, worktrees, GitHub setup, daily loop, agent loop
 │   └── scripts/             # worktree-reset.sh, ship-preflight.sh (ready to copy)
-├── .claude-plugin/          # Plugin manifest (plugin name: dev-workflow)
-│   └── plugin.json
-│   # ── legacy prompt collections (secondary in the README) ──
-├── context-files/           # Prompts that generate AI tool context files
-│   ├── cursorrules-small-repo.md
-│   ├── cursorrules-large-repo.md
-│   ├── claude-md-generator.md
-│   ├── gemini-rules-generator.md
-│   └── antigravity-rules-generator.md
-├── codebase-audit-docs/     # 3-prompt pipeline for multi-repo documentation + audit
-│   ├── prompt-documentation.md
-│   ├── prompt-audit.md
-│   └── prompt-context-update.md
-├── web-optimization/        # Web performance + SEO prompts
-│   ├── pagespeed-optimization.md
-│   └── seo-geo-aeo-optimization.md
-├── workflows/               # Process & handover prompts
-│   └── project-handover.md
+├── hooks/                   # Plugin SessionStart hook (silent outside configured repos)
+├── scripts/                 # bump-version.sh — release version bump + drift check
+├── .claude-plugin/          # Plugin manifest + marketplace (plugin name: dev-workflow)
+├── extras/                  # LEGACY prompt collections, demoted — README.md there indexes them
+│   ├── context-files/       # AI tool context-file generators
+│   ├── codebase-audit-docs/ # 3-prompt multi-repo documentation + audit pipeline
+│   ├── web-optimization/    # PageSpeed + SEO/GEO/AEO prompts
+│   └── handover/            # project-handover.md checklist
 ├── site/                    # HTML guide page + static assets
-│   ├── index.html
-│   └── assets/
 └── README.md
 ```
 
@@ -64,11 +52,12 @@ dev-workflow/
 
 ## Conventions
 
-- README.md leads with the framework (pitch → quickstart → how it's put together)
-  and demotes the prompt collections into a secondary "Also in this repo" section;
-  keep that ordering when editing
-- All prompts are Markdown files organized into categorized subdirectories
-- Each prompt collection has its own folder and a numbered subsection in the README
+- README.md is about the framework (pitch → tiers → quickstart → how it's put
+  together); the prompt collections get one short "Extras" section pointing at
+  `extras/README.md` — their detail tables live THERE, not in the root README;
+  keep that split when editing
+- All prompts are Markdown files organized into categorized subdirectories under
+  `extras/`, indexed by `extras/README.md`
 - `site/` contains the HTML guide page and is not a prompt directory
 - `dev-workflow/` is a real framework, not prompts: the per-repo `dev-workflow.yml`
   contract, its PyYAML validator (`validate.py` — enforces boundary rule 1,
