@@ -8,6 +8,16 @@
     uv run dev-workflow/dw-config.py <yml> <dotted.path> [default]     # framework checkout
     python3 dev-workflow/dw-config.py <yml> <dotted.path> [default]    # bare system python3
 
+Batch mode — resolve many keys in one call (for a skill preamble):
+
+    dw-config dev-workflow.yml --batch key[=default] [key[=default] ...]
+
+prints one `key=value` line per key. The key keeps its dots on the left (it is a
+label, not a shell variable); the value is shell-escaped so it is unambiguous. A
+missing key with a default prints the (escaped) default; a missing key with no
+default prints `key=` (empty value) and still exits 0. Single-key mode above is
+unchanged.
+
 PyYAML is used when importable (via `uv run` it comes from uv's cache — the PEP
 723 header above; no venv, no project sync). When it is absent — e.g. the PATH
 `dw-config` shim running under a bare system python3 — a stdlib-only parser
@@ -21,9 +31,26 @@ is). Example:
     dw-config dev-workflow.yml tracker.team
     dw-config dev-workflow.yml build.model sonnet
 """
+import shlex
 import sys
 
 _MISSING = object()
+
+
+def _scalar_str(v):
+    """Render a scalar the way the batch line should carry it (bools lowercased
+    to shell-friendly true/false; everything else via str)."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return str(v)
+
+
+def _batch_value(value):
+    """Shell-escape a resolved value for one batch `key=value` line. A list becomes
+    space-separated, each item individually quoted."""
+    if isinstance(value, list):
+        return " ".join(shlex.quote(_scalar_str(v)) for v in value)
+    return shlex.quote(_scalar_str(value))
 
 
 def _strip_comment(line):
@@ -182,8 +209,31 @@ def get(data, dotted):
 
 def main(argv):
     if len(argv) < 3:
-        sys.stderr.write("usage: dw-config <yml> <dotted.path> [default]\n")
+        sys.stderr.write(
+            "usage: dw-config <yml> <dotted.path> [default]\n"
+            "       dw-config <yml> --batch key[=default] [key[=default] ...]\n"
+        )
         return 2
+
+    # Batch mode: one shell-escaped `key=value` line per requested key.
+    if argv[2] == "--batch":
+        path = argv[1]
+        with open(path) as fh:
+            data = _load(fh)
+        for spec in argv[3:]:
+            key, sep, default = spec.partition("=")
+            value = get(data, key)
+            if value is _MISSING:
+                if sep and default != "":
+                    print("%s=%s" % (key, shlex.quote(default)))
+                else:
+                    print("%s=" % key)
+            elif value is None:
+                print("%s=" % key)
+            else:
+                print("%s=%s" % (key, _batch_value(value)))
+        return 0
+
     path, dotted = argv[1], argv[2]
     default = argv[3] if len(argv) > 3 else _MISSING
     with open(path) as fh:
