@@ -127,7 +127,8 @@ cd "$DW_WORK_TREE" || { log "FATAL: work tree $DW_WORK_TREE missing"; exit 1; }
 # work tree is a parent checkout holding child clones + docs + PM state and must
 # never be reset (child clones are reset per-child by the parent skill).
 MANAGER="${DW_MANAGER:-$(cfg agent.manager false 2>/dev/null || echo false)}"
-case "$MANAGER" in 1|true|yes|on) MANAGER=1 ;; *) MANAGER=0 ;; esac
+# lowercase first: dw-config prints a YAML boolean as Python True/False (capital).
+case "$(printf '%s' "$MANAGER" | tr 'A-Z' 'a-z')" in 1|true|yes|on) MANAGER=1 ;; *) MANAGER=0 ;; esac
 if [ "$MANAGER" = 1 ]; then
   log "manager mode — parent work tree, skipping git reset"
 elif [ "$RUNNER_INSIDE_WORKTREE" = "1" ]; then

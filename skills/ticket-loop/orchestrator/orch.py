@@ -143,6 +143,18 @@ def load_roster(path):
         cadence = entry.get("cadence", cfg["cadence"])
         if cadence not in ("adaptive", "fixed"):
             raise RosterError(f"{name}: cadence must be adaptive|fixed")
+        # `skill` must be a simple skill name — it becomes a `/skill` (or
+        # `/dev-workflow:skill`) invocation string in the runner, so reject
+        # anything a non-string YAML value or spaces would turn into a malformed
+        # command (guards against `skill: {x: 1}` → "/{'x': 1}").
+        sk = entry.get("skill")
+        skill = None
+        if sk not in (None, ""):
+            sk = str(sk).strip()
+            if not sk or not all(c.isalnum() or c in ":_-" for c in sk):
+                raise RosterError(f"{name}: skill must be a simple skill name "
+                                  f"(letters/digits and : _ -), got {entry.get('skill')!r}")
+            skill = sk
         # `enabled: false` pauses a project WITHOUT removing it: state is kept
         # (not pruned), the startup marker guard is skipped (so an entry can be
         # staged before its clone exists), and the scheduler never picks it.
@@ -157,10 +169,9 @@ def load_roster(path):
             "cadence": cadence,
             "interval_s": parse_duration(entry.get("interval", cfg["interval"])),
             "enabled": _as_bool(entry.get("enabled", True), True),
-            # `skill` (optional): which skill the pass invokes — a bare skill NAME
-            # (e.g. ticket-loop-parent), the runner namespaces it. Overrides the
-            # repo's own agent.skill. None → the runner's default (ticket-loop).
-            "skill": (str(entry["skill"]).strip() if entry.get("skill") else None),
+            # `skill` (optional): a bare skill NAME the runner namespaces (validated
+            # above). Overrides the repo's agent.skill. None → default (ticket-loop).
+            "skill": skill,
             # `manager` (optional): manager/parent mode — the runner must NOT
             # git-reset the work tree (a parent checkout holds child clones + docs,
             # it is not a disposable single-repo tree). Overrides repo agent.manager.

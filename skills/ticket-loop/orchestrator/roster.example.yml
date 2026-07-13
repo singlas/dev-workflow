@@ -46,6 +46,8 @@ projects:
     # skill: ticket-loop-parent          # which skill the pass invokes (bare name;
                                          # the runner namespaces it). Overrides the
                                          # repo's agent.skill. Default: ticket-loop.
+                                         # (ticket-loop-parent is Phase 2 — not built
+                                         # yet; only ticket-loop runs today.)
     # manager: true                      # manager/parent mode — the runner does NOT
                                          # git-reset this work tree (a parent checkout
                                          # holds child clones + docs + PM state).

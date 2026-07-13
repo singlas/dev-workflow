@@ -103,6 +103,9 @@ build:
 #   enabled: false
 #   skill: ticket-loop-parent   # OPTIONAL: which skill a pass invokes (bare name).
 #                               # A roster `skill:` entry overrides this. Default: ticket-loop.
+#                               # NOTE: `ticket-loop-parent` itself is Phase 2 (not built
+#                               # yet); the selector + manager mode that carry it shipped
+#                               # in Phase 1. Only `ticket-loop` is runnable today.
 #   manager: true               # OPTIONAL: manager/parent mode — the runner does NOT
 #                               # git-reset the work tree (a parent checkout holds child
 #                               # clones + docs + PM state). Roster `manager:` overrides this.

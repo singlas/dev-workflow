@@ -62,7 +62,8 @@ BASE_BRANCH="$(cfg repo.base_branch dev)"
 # work tree is a PARENT checkout holding child clones + docs + PM state, not a
 # disposable single-repo tree — never reset it (children reset per-child).
 MANAGER="${DW_MANAGER:-$(cfg agent.manager false || true)}"
-case "$MANAGER" in 1|true|yes|on) MANAGER=1 ;; *) MANAGER=0 ;; esac
+# lowercase first: dw-config prints a YAML boolean as Python True/False (capital).
+case "$(printf '%s' "$MANAGER" | tr 'A-Z' 'a-z')" in 1|true|yes|on) MANAGER=1 ;; *) MANAGER=0 ;; esac
 
 # ── bring the work tree current with origin/<base> ──
 cd "$DW_WORK_TREE"

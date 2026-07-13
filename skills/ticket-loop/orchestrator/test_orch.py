@@ -814,6 +814,19 @@ projects:
         self.assertIsNone(by["beta"]["skill"])       # default: no skill override
         self.assertFalse(by["beta"]["manager"])      # default: not a manager entry
 
+    def test_bad_skill_rejected(self):
+        # a non-simple skill value would become a malformed "/…" invoke string
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(orch.RosterError):
+                self._load(tmp, f"""
+projects:
+  - name: alpha
+    work_tree: {tmp}/alpha
+    env_file: {tmp}/alpha.env
+    state_dir: {tmp}/s-alpha
+    skill: "rm -rf /"
+""")
+
     def test_repo_url_branch_forms(self):
         self.assertEqual(orch._repo_url_branch("github.com/o/r"), ("github.com/o/r", "main"))
         self.assertEqual(orch._repo_url_branch({"url": "u", "branch": "b"}), ("u", "b"))
