@@ -57,8 +57,11 @@ one command; pick the verb by **what changed**:
     skills/ticket-loop/orchestrator/deploy.sh deploy
     skills/ticket-loop/orchestrator/deploy.sh deploy --no-push   # redeploy the box's HEAD, don't push
 
-    # config on the VOLUME (roster.yml, orch.env, a project's *.env) — rewrite the
-    # volume file first (§4/§10), then reload without a rebuild:
+    # config on the VOLUME (roster.yml, orch.env, a project's *.env) — edit the
+    # LOCAL master in .local/, then push to the volume + restart in one step:
+    skills/ticket-loop/orchestrator/deploy.sh config
+
+    # reload volume config already in place (no push), e.g. after a manual edit:
     skills/ticket-loop/orchestrator/deploy.sh restart
 
     skills/ticket-loop/orchestrator/deploy.sh status   # container + running-code check + tail
@@ -68,8 +71,28 @@ Config via env (defaults match nt): `HOST` (default `nt`), `CLAUDE_PIN`
 (default `2.1.207`, also the image tag), `IMAGE`, `VOLUME`, `CONTAINER`,
 `REMOTE_DIR`, `BRANCH`. Docs-only changes (README, specs) need no verb — `deploy`
 pulls them incidentally; a bare `git pull` on the box is enough on its own. The
-script is the executable source of truth for the §10 `docker run` flags and
-never touches secrets/roster/env files (those live in `.local/` + the volume).
+script is the executable source of truth for the §10 `docker run` flags.
+
+**`.local/` is the config source of truth (gitignored).** `config` reads
+`.local/deploy-manifest` — a `<local-file> <volume-path> <mode>` table — and
+pipes each listed file straight into the volume as uid 10001 (never printed,
+never committed), then restarts. The master copies belong here:
+
+    .local/
+      deploy-manifest      # local-file → volume-path → mode
+      roster.yml           → /home/agent/roster.yml     (644)
+      orch.env             → /home/agent/orch.env       (600)  ops + DEFAULT_TELEGRAM_BOT_TOKEN
+      niptao-agent.env     → /home/agent/agent.env      (600)  niptao loop secrets
+      niptao.env           → /home/agent/niptao/.env    (600)  niptao APP env
+      rasa-agent.env       → /home/agent/rasa.env       (600)  rasa loop secrets
+      # paytunes-agent.env → /home/agent/paytunes.env   (600)  staged; uncomment when seeded
+      # paytunes.env       → /home/agent/paytunes/.env  (600)
+
+Onboarding a project's config is then: fill its `.local/*.env`, uncomment its
+manifest + roster lines (only after its clone + `.dw-agent-clone` marker exist —
+a roster entry for a missing work tree blocks startup), and run `config`.
+Back up / re-seed `.local` from the box with
+`scp <host>:dev-workflow/.local/*.env .local/`.
 
 ## Deployment runbook (docker — field-tested on nt, 2026-07-12)
 

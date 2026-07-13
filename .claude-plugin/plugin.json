@@ -1,8 +1,11 @@
 {
   "name": "dev-workflow",
-  "description": "HCode dev-workflow: standup/cleanup/release skills + the ticket-loop autonomous agent, configured per-repo by dev-workflow.yml",
-  "version": "0.4.0",
+  "description": "CI, but for ticket work: standup/cleanup/release/blog-from-session/setup session skills + the opt-in ticket-loop agent, in three tiers (v1 local dev, v2 local agent, v3 remote runner), configured per-repo by dev-workflow.yml",
+  "version": "0.5.0",
   "author": {
     "name": "HCode Technologies"
-  }
+  },
+  "homepage": "https://github.com/singlas/dev-workflow",
+  "repository": "https://github.com/singlas/dev-workflow",
+  "keywords": ["workflow", "tickets", "linear", "worktrees", "agent"]
 }

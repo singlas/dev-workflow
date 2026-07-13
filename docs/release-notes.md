@@ -1,5 +1,81 @@
 # Release notes
 
+## v0.5.0
+
+**Tiered install + the multi-project orchestrator.** The plugin now presents three
+tiers in one install, and the autonomous loop grew a round-robin orchestrator for
+running many repos on one box.
+
+### Tiered install (v1 / v2 / v3)
+- **v1 — Local developer (default).** Everything works out of the box after
+  `claude plugin install`: the session skills + a per-repo `dev-workflow.yml`.
+- **v2 — Local agent (opt-in, OFF by default).** The `ticket-loop` skill + its
+  launchd/cron installer are now gated by a new **`agent.enabled: true`** key.
+  Absent/false → `/ticket-loop` (interactively) and `install-cron.sh` refuse with a
+  clear opt-in message. It is a feature switch, deliberately independent of the
+  tighten-only ceilings; the validator type-checks it (absent/true/false valid).
+  **The v3 Docker/orchestrator path is NOT gated on this key** — production
+  deployments predate it. The gate hangs off the interactive skill preflight (which
+  the headless runner skips via `TICKET_LOOP_LOCK_HELD`) and `install-cron.sh` only,
+  never `cron-run.sh`.
+- **v3 — Remote runner (repo-level, separate).** The Docker runner + orchestrator
+  keep their own runbook track; not part of plugin install.
+
+### New `/setup` onboarding skill
+- First-run skill: checks prereqs (git, `uv`, `gh`, `LINEAR_API_KEY`), interviews for
+  the required config, writes a validated `dev-workflow.yml` from the bundled example,
+  then points at the daily worktree workflow. Writes only that one local file — never
+  commits, pushes, or moves a ticket. Mentions v2 but enables it only on explicit ask.
+
+### SessionStart auto-orientation hook
+- A Claude Code SessionStart hook injects a short brief when a session opens in a repo
+  that has a `dev-workflow.yml` (skills available + whether the v2 agent is on), and
+  stays **silent** in every repo without one. Never blocks session start.
+
+### Plugin-install config resolution
+- Every skill's `dw-config` note now includes the plugin-install path
+  (`uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" …`) alongside the hardened
+  PATH shim and framework-checkout forms — a plugin-install user has neither of the
+  latter two. Same treatment for release's `dw-telegram` fallback.
+
+### Multi-project orchestrator (loop)
+- **Round-robin scheduler** (`orchestrator/`) over the same runner image: roster load,
+  marker-file work-tree guard, atomic orch-state, memory gate, window intersection,
+  run-now, forced safety pass.
+- **Four-class outcome classification** + backoff transitions with error/crash
+  escalation; classification reads only the current pass's log segment.
+- **PID-1 driver** — timeout process-group kill, secret-scoped passes, pre-check,
+  drain, run-now; startup crash-recovery + boot lock-clear, pass-start write-ahead,
+  status table. Offline smoke test.
+- **Zero-cost waiting** via a peek-only pre-check + `orch.env` with a shared default
+  bot; baked into the agent image with seed marker, deployment/rollout/onboarding docs
+  (field-tested in the first `nt` rollout).
+
+### Pass-outcome contract
+- The skill writes `<state>/outcome.json` as its last act; `cron-run.sh` deletes any
+  stale one at pass start so a crashed/killed pass is never classified from the
+  previous pass's line. Annotated roster example.
+
+### Queue-depth pre-check — `queue_count`
+- New `queue_count` verb (`dev-workflow/queue-count.py`, GraphQL over `urllib`, keyed
+  by `LINEAR_API_KEY`) — a Linear queue-depth pre-check sharing one filter definition
+  with `list_actionable`, so the orchestrator can decide whether a pass is worth
+  spending a session on without starting Claude.
+
+### Telegram read-only peek
+- New `telegram.py peek` subcommand — detects a pre-check poke without consuming the
+  update offset (the interactive/loop drain still owns the offset).
+
+### Docker fixes
+- Default `LANG`/`LC_ALL` to `C.UTF-8` (the slim image ships no `en_US` locale,
+  silencing per-pass `setlocale` warnings).
+- `useradd` by absolute path (`/usr/sbin/useradd`) — the image `ENV PATH` omits
+  `/usr/sbin`, which broke the build.
+
+### Manifest metadata
+- `plugin.json` → `0.5.0`; description covers all shipped skills + the tier model;
+  added `repository`, `homepage`, and `keywords`. `marketplace.json` description synced.
+
 ## v0.4.0
 
 ### Telegram verbs — flag, list & prune questions (loop)
