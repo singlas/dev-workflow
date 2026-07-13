@@ -45,8 +45,15 @@ enumerated in [`skills/ticket-loop/env.example`](skills/ticket-loop/env.example)
 
 ### Interactive skills
 
-1. **Install the plugin.** Either `claude plugin install` (plugin name
-   `dev-workflow`), or point Claude Code at a clone of this repo:
+1. **Install the plugin.** Add this repo as a plugin marketplace once, then
+   install from it:
+
+   ```
+   claude plugin marketplace add singlas/dev-workflow
+   claude plugin install dev-workflow
+   ```
+
+   Or skip the marketplace and point Claude Code at a clone of this repo:
 
    ```
    claude --plugin-dir <path-to-this-clone>
@@ -63,10 +70,15 @@ enumerated in [`skills/ticket-loop/env.example`](skills/ticket-loop/env.example)
    repo root by hand and edit the values (branch model, tracker team/roles,
    test/lint commands, tightened guardrails).
 
-3. **Validate it:**
+3. **Validate it.** `/setup` already validates what it writes. If you edited the
+   config by hand, run the validator yourself — from your repo root, pointing at
+   wherever the framework lives (the plugin cache for a marketplace install, or
+   your clone):
 
    ```
-   uv run dev-workflow/validate.py dev-workflow.yml     # -> OK: dev-workflow.yml
+   uv run "$CLAUDE_PLUGIN_ROOT/dev-workflow/validate.py" dev-workflow.yml  # inside a session
+   uv run <path-to-clone>/dev-workflow/validate.py dev-workflow.yml       # from a clone
+   # -> OK: dev-workflow.yml
    ```
 
    The validator rejects unknown keys and any config that tries to *loosen* a
@@ -163,7 +175,9 @@ dev-workflow/
 ├── dev-workflow/            # The framework: config contract + validator + tracker seam
 ├── skills/                  # Claude Code plugin skills — standup, cleanup, release, ticket-loop
 ├── dev-process/             # The narrative playbook behind the skills (branches, worktrees, loop)
-├── .claude-plugin/          # Plugin manifest (plugin name: dev-workflow)
+├── hooks/                   # Plugin SessionStart hook — auto-orients sessions in configured repos
+├── scripts/                 # Repo maintenance — bump-version.sh (release version bump + drift check)
+├── .claude-plugin/          # Plugin manifest + marketplace (plugin name: dev-workflow)
 ├── context-files/           # (collection) AI tool context-file generators
 ├── codebase-audit-docs/     # (collection) 3-prompt multi-repo audit pipeline
 ├── web-optimization/        # (collection) PageSpeed + SEO/GEO/AEO prompts

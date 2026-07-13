@@ -171,8 +171,9 @@ anytime).
 ### Install as a Claude Code plugin
 
 `ticket-loop` ships inside the **`dev-workflow`** plugin (manifest at
-`.claude-plugin/plugin.json`). Install it with `claude plugin install` (plugin name
-`dev-workflow`), or point Claude Code at a checkout with `--plugin-dir <path>` and
+`.claude-plugin/plugin.json`). Install it with
+`claude plugin marketplace add singlas/dev-workflow` +
+`claude plugin install dev-workflow`, or point Claude Code at a checkout with `--plugin-dir <path>` and
 invoke `/dev-workflow:ticket-loop`. The container runner does exactly this — it
 passes `--plugin-dir /opt/dev-workflow/plugin` when the pinned `claude` supports the
 flag, and falls back to a repo-local `/ticket-loop` (with a logged warning) when it

@@ -102,8 +102,8 @@ much as it wants; each tier builds on the one before.
 ### v1 — Local developer (default, every install)
 
 The interactive session skills, working locally. Install the plugin
-(`claude plugin install`, plugin name `dev-workflow`, or `--plugin-dir <checkout>`),
-then:
+(`claude plugin marketplace add singlas/dev-workflow` once, then
+`claude plugin install dev-workflow` — or `--plugin-dir <checkout>`), then:
 
 - Run **`/setup`** to write a validated `dev-workflow.yml` (prereq checks +
   interview), or copy [`dev-workflow.example.yml`](dev-workflow.example.yml) by hand.
