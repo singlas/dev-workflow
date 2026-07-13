@@ -59,7 +59,7 @@ to walk through any missing keys the validator flags, editing in place with the
 human's confirmation.
 
 ```bash
-if command -v dw-config >/dev/null 2>&1; then DW="dw-config"                                            # hardened install (PATH)
+if command -v dw-config >/dev/null 2>&1 && dw-config 2>&1 | grep -q -- '--batch'; then DW="dw-config"   # hardened install (PATH), only if --batch-capable
 elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
 else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
 $DW dev-workflow.yml --batch repo.base_branch repo.prod_branch tracker.provider tracker.team \
