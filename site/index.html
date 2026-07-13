@@ -495,11 +495,11 @@ We surveyed 23 developers, conducted 10+ in-depth interviews, and ran structured
 
 <div class="callout-green">
   <p class="callout-title"><a href="https://github.com/singlas/dev-workflow" target="_blank" rel="noopener" style="color: #1B8A3D; text-decoration: none;">github.com/singlas/dev-workflow</a></p>
-  <p>Our public repository of curated AI prompts for developer workflows:</p>
+  <p>Our public repository &mdash; <strong>dev-workflow: CI, but for ticket work.</strong> A Claude Code plugin + per-repo config file that works your board inside guardrails a repo can tighten but never loosen:</p>
   <ul class="checklist" style="margin-top: 6px;">
-    <li><strong>Context file generators</strong> &mdash; paste into your AI IDE, scans your repo and generates a project-specific context file automatically</li>
-    <li><strong>Multi-tool support</strong> &mdash; generators for Cursor, Claude Code, Gemini CLI, and Google Antigravity</li>
-    <li><strong>Workflow prompts</strong> &mdash; code review, refactoring, debugging, migration prompts</li>
+    <li><strong>The framework (v1)</strong> &mdash; session skills (<code>/standup</code>, <code>/cleanup</code>, <code>/release</code>, <code>/setup</code>) driven by one <code>dev-workflow.yml</code>, with a worktree-based branch workflow</li>
+    <li><strong>Opt-in autonomous agent (v2/v3)</strong> &mdash; the ticket-loop skill works your Linear queue, asks clarifying questions in a Telegram group, and opens one reviewable PR per ticket; scales from a local schedule to a Docker runner with a multi-project orchestrator</li>
+    <li><strong>The original prompt collections</strong> &mdash; context-file generators (Cursor, Claude Code, Gemini CLI, Antigravity), a multi-repo audit pipeline, and a handover checklist &mdash; now in <code>extras/</code></li>
   </ul>
   <p style="margin-top: 6px;">We'll keep adding to this. Contributions welcome.</p>
 </div>
