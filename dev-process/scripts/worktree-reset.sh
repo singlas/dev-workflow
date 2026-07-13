@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 #
 # worktree-reset.sh — start a fresh feature in a git worktree: point it at a NEW
-# auto-numbered branch off latest dev, link shared per-machine state, install deps.
+# auto-numbered branch off the latest trunk, link shared per-machine state, install deps.
 # (Reset is the default; pass --link to ONLY (re)create the shared symlinks.)
 #
-# Branch model (see ../README.md): dev is the integration trunk; feature branches
-# start from origin/dev and PR back into dev (no deploy). main is the prod mirror —
-# it only advances via a dev→main PR (the deploy). For an urgent prod fix, pass
-# --hotfix to base off origin/main instead; PR that straight to main, then
-# back-merge main→dev.
+# Branch model (see ../README.md): the TRUNK is the integration trunk; feature
+# branches start from origin/<trunk> and PR back into the trunk (no deploy). PROD
+# is the prod mirror — it only advances via a trunk→prod PR (the deploy). For an
+# urgent prod fix, pass --hotfix to base off origin/<prod> instead; PR that straight
+# to prod, then back-merge prod→trunk.
+#
+# The trunk and prod branch names default to `dev` and `main`; override per repo
+# with the env vars WORKTREE_TRUNK and WORKTREE_PROD (e.g. WORKTREE_TRUNK=develop
+# WORKTREE_PROD=production). `master` is always also treated as a long-lived branch.
 #
 # Git worktrees share one .git but each has its own working directory, so
 # gitignored/untracked files (.env, local scratch, …) are NOT shared. This symlinks
@@ -50,6 +54,18 @@
 # fallback.)
 
 set -euo pipefail
+
+# ── branch model (override per repo via the environment) ──────────────
+# TRUNK = the integration trunk (feature branches start here and PR back here).
+# PROD  = the prod mirror (only a trunk→prod PR, or a --hotfix PR, advances it).
+# Defaults keep every existing caller unchanged; a repo on develop/production
+# exports WORKTREE_TRUNK/WORKTREE_PROD. `master` stays a guarded long-lived name.
+TRUNK="${WORKTREE_TRUNK:-dev}"
+PROD="${WORKTREE_PROD:-main}"
+if [ "$TRUNK" = "$PROD" ]; then
+  echo "ERROR: WORKTREE_TRUNK and WORKTREE_PROD are both '$TRUNK' — the branch model needs a distinct trunk and prod branch (trunk PRs merge cheaply; prod only advances via a trunk→prod deploy)." >&2
+  exit 2
+fi
 
 # ── EDIT ME ───────────────────────────────────────────────────────────
 # Per-worktree dependency install, run after a reset (each worktree keeps its own
@@ -122,8 +138,8 @@ sweep_worktrees() {
     case "$base" in feature-[a-z]) continue ;; esac
     br="$(git -C "$wt" symbolic-ref --quiet --short HEAD || true)"
     [ -z "$br" ] && continue                       # detached HEAD — leave it alone
-    case "$br" in main|master|dev) continue ;; esac
-    git merge-base --is-ancestor "$br" origin/dev 2>/dev/null || continue
+    case "$br" in "$PROD"|master|"$TRUNK") continue ;; esac
+    git merge-base --is-ancestor "$br" "origin/$TRUNK" 2>/dev/null || continue
     if [ -n "$(git -C "$wt" status --porcelain --untracked-files=no)" ]; then
       echo "keep   worktree $base — uncommitted tracked changes (branch '$br' IS merged; inspect + remove manually)"
       continue
@@ -147,7 +163,7 @@ sweep_worktrees() {
     # --force: ignored build state (venv, node_modules) and the shared symlinks
     # would otherwise block removal; safety is the checks above, not git's.
     git worktree remove --force "$wt"
-    echo "swept  worktree $base (branch '$br' merged into dev)"
+    echo "swept  worktree $base (branch '$br' merged into $TRUNK)"
     git branch -d "$br" >/dev/null 2>&1 || true
     removed=$((removed+1))
   done < <(git worktree list --porcelain | sed -n 's/^worktree //p')
@@ -157,8 +173,8 @@ sweep_worktrees() {
 sweep_merged_local() {
   local swept=0 b
   for b in $(git for-each-ref --format='%(refname:short)' refs/heads/); do
-    case "$b" in main|master|dev|"$BRANCH") continue ;; esac
-    if git merge-base --is-ancestor "$b" origin/dev 2>/dev/null \
+    case "$b" in "$PROD"|master|"$TRUNK"|"$BRANCH") continue ;; esac
+    if git merge-base --is-ancestor "$b" "origin/$TRUNK" 2>/dev/null \
        && git branch -d "$b" >/dev/null 2>&1; then
       echo "swept  local branch '$b' (merged)"; swept=$((swept+1))
     fi
@@ -167,16 +183,16 @@ sweep_merged_local() {
 }
 
 sweep_merged_remote() {
-  local swept=0 dev_sha r short
-  dev_sha="$(git rev-parse origin/dev)"
+  local swept=0 trunk_sha r short
+  trunk_sha="$(git rev-parse "origin/$TRUNK")"
   for r in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin/); do
     short="${r#origin/}"
-    # Never sweep the long-lived branches: main (prod) is usually an ancestor of
-    # dev, so it'd otherwise match the "merged into dev" test below.
-    case "$short" in main|master|dev|HEAD) continue ;; esac
-    # merged into origin/dev but not origin/dev itself
-    if [ "$(git rev-parse "$r")" != "$dev_sha" ] \
-       && git merge-base --is-ancestor "$r" origin/dev 2>/dev/null \
+    # Never sweep the long-lived branches: prod is usually an ancestor of the
+    # trunk, so it'd otherwise match the "merged into trunk" test below.
+    case "$short" in "$PROD"|master|"$TRUNK"|HEAD) continue ;; esac
+    # merged into origin/<trunk> but not origin/<trunk> itself
+    if [ "$(git rev-parse "$r")" != "$trunk_sha" ] \
+       && git merge-base --is-ancestor "$r" "origin/$TRUNK" 2>/dev/null \
        && git push -q origin --delete "$short" 2>/dev/null; then
       echo "swept  remote branch 'origin/$short' (merged)"; swept=$((swept+1))
     fi
@@ -196,11 +212,11 @@ if [ "$GC_ONLY" = 1 ]; then
 fi
 
 if [ "$CANON" = "$WORKTREE_ROOT" ]; then
-  echo "This is the canonical (main) repo at $CANON — run from a linked worktree (or pass --gc)."
+  echo "This is the canonical repo at $CANON — run from a linked worktree (or pass --gc)."
   exit 0
 fi
 
-# ── reset (default): fresh branch off latest origin/dev (origin/main if --hotfix) ──
+# ── reset (default): fresh branch off latest origin/<trunk> (origin/<prod> if --hotfix) ──
 if [ "$LINK_ONLY" != 1 ]; then
   SLOT="$(basename "$WORKTREE_ROOT")"
   # Refuse on a dirty tree — tracked changes only (the shared symlinks show as
@@ -210,17 +226,17 @@ if [ "$LINK_ONLY" != 1 ]; then
     git status --short --untracked-files=no >&2
     exit 1
   fi
-  # One fetch: refresh origin/dev + origin/main AND prune remote-tracking refs whose
-  # upstream was deleted on merge. Do it before naming so the auto-increment below
-  # sees the true set of live local + remote branches.
+  # One fetch: refresh origin/<trunk> + origin/<prod> AND prune remote-tracking refs
+  # whose upstream was deleted on merge. Do it before naming so the auto-increment
+  # below sees the true set of live local + remote branches.
   git fetch origin --prune
 
-  if ! git show-ref --verify --quiet refs/remotes/origin/dev; then
-    echo "ERROR: origin/dev not found. New branches start from dev (see ../README.md)." >&2
-    echo "Create it once:  git push origin origin/main:refs/heads/dev   (then set dev as the GitHub default branch)." >&2
+  if ! git show-ref --verify --quiet "refs/remotes/origin/$TRUNK"; then
+    echo "ERROR: origin/$TRUNK not found. New branches start from $TRUNK (see ../README.md)." >&2
+    echo "Create it once:  git push origin origin/$PROD:refs/heads/$TRUNK   (then set $TRUNK as the GitHub default branch)." >&2
     exit 1
   fi
-  if [ "$HOTFIX" = 1 ]; then BASE_REF="origin/main"; else BASE_REF="origin/dev"; fi
+  if [ "$HOTFIX" = 1 ]; then BASE_REF="origin/$PROD"; else BASE_REF="origin/$TRUNK"; fi
 
   # Branch name. Explicit arg wins; otherwise mint a brand-new <slot>-N (the smallest
   # number above every existing local/remote <slot>-N).
@@ -234,11 +250,12 @@ if [ "$LINK_ONLY" != 1 ]; then
     done
     BRANCH="$SLOT-$n"
   fi
-  # A feature worktree must never sit on a long-lived branch: main is the prod-deploy
-  # mirror, dev is the integration trunk — you branch OFF them, you don't work ON them here.
+  # A feature worktree must never sit on a long-lived branch: prod is the deploy
+  # mirror, the trunk is the integration branch — you branch OFF them, you don't
+  # work ON them here.
   case "$BRANCH" in
-    main|master|dev)
-      echo "ERROR: refusing to put a worktree on '$BRANCH' — that's a long-lived branch (main=prod, dev=trunk)." >&2
+    "$PROD"|master|"$TRUNK")
+      echo "ERROR: refusing to put a worktree on '$BRANCH' — that's a long-lived branch ($PROD=prod, $TRUNK=trunk)." >&2
       echo "Pass an explicit feature name: scripts/worktree-reset.sh <name>" >&2
       exit 1 ;;
   esac
@@ -273,7 +290,7 @@ if [ "$LINK_ONLY" != 1 ]; then
   # intentionally kept (its PR may still be open), just no longer checked out here.
   if [ -n "${PREV:-}" ] && [ "$PREV" != "$BRANCH" ] \
      && git show-ref --verify --quiet "refs/heads/$PREV"; then
-    left="$(git rev-list --count "origin/dev..$PREV" 2>/dev/null || echo 0)"
+    left="$(git rev-list --count "origin/$TRUNK..$PREV" 2>/dev/null || echo 0)"
     [ "$left" -gt 0 ] && echo "note   kept earlier branch '$PREV' ($left unshipped commit(s)) — still here locally."
   fi
   echo
