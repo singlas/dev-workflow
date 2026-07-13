@@ -1,0 +1,29 @@
+# dev-workflow.yml — the framework repo dogfooding its own workflow.
+#
+# Branch model (two-branch release): base_branch `dev` is the integration trunk
+# every feature PR lands on; prod_branch `main` is what people install the plugin
+# from. Shipping = a dev->main PR via /release. Merging a feature PR into dev does
+# NOT release; promoting dev->main does.
+#
+# Tracker note: points at an EXISTING Linear team (RasaApp/RAS), reused only so
+# the config validates — dev-workflow's own work isn't tracked there, so the
+# board/standup/loop features aren't meaningful here; the value is that
+# /cleanup and /release resolve base/prod and the quality gate. Swap
+# tracker.team / ticket_prefix if you stand up a real dev-workflow board.
+
+repo:
+  url: https://github.com/singlas/dev-workflow
+  base_branch: dev
+  prod_branch: main
+  branch_prefix: feature
+
+tracker:
+  provider: linear
+  team: RasaApp
+  ticket_prefix: RAS
+
+# No unified test runner in-repo — run the stdlib unittest suites + the offline
+# smoke test (mirrors CLAUDE.md's `python3 <file>` idiom). No {pkgs} split.
+quality:
+  test: "python3 dev-workflow/test_validate.py && python3 dev-workflow/test_queue_count.py && python3 dev-workflow/test_dw_config.py && python3 skills/ticket-loop/orchestrator/test_orch.py && python3 skills/ticket-loop/test_telegram.py && bash skills/ticket-loop/orchestrator/test_orchestrator_smoke.sh"
+  lint: "python3 -m py_compile dev-workflow/*.py skills/ticket-loop/*.py skills/ticket-loop/orchestrator/*.py"
