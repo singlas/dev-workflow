@@ -10,9 +10,10 @@ codebase.
 Three tiers, adopt as far as you want to go:
 
 - **v1 — Local developer (default, every install).** Install the plugin, run
-  `/setup` to write a `dev-workflow.yml`, and work locally: `/standup` to orient,
-  `/cleanup` to ship a PR, `/release` to promote, `/blog-from-session` on the
-  side. Worktree-based branch workflow. This is what you get out of the box.
+  `/setup` to write a `dev-workflow.yml`, then work locally with the session
+  skills — `/worktree`, `/standup`, `/cleanup`, `/release` (plus
+  `/blog-from-session`). They run on [the opinionated workflow](#2-the-opinionated-workflow)
+  below. This is what you get out of the box.
 - **v2 — Local agent (opt-in, OFF by default).** A local autonomous agent (the
   `ticket-loop` skill + a launchd/cron installer) that works your queue on your
   machine and opens one PR per ticket. Gated by `agent.enabled: true` in
@@ -59,8 +60,8 @@ enumerated in [`skills/ticket-loop/env.example`](skills/ticket-loop/env.example)
    claude --plugin-dir <path-to-this-clone>
    ```
 
-   It provides `/setup`, `/standup`, `/cleanup`, `/release`, `/ticket-loop`, and
-   `/blog-from-session`. Opening a session in a repo that already has a
+   It provides `/setup`, `/worktree`, `/standup`, `/cleanup`, `/release`,
+   `/ticket-loop`, and `/blog-from-session`. Opening a session in a repo that already has a
    `dev-workflow.yml` auto-orients you (a SessionStart hook injects a short brief;
    it stays silent in every repo without one).
 
@@ -84,8 +85,10 @@ enumerated in [`skills/ticket-loop/env.example`](skills/ticket-loop/env.example)
    The validator rejects unknown keys and any config that tries to *loosen* a
    baseline (see the boundary rules below).
 
-4. **Open a session** with `/standup`, close it with `/cleanup`, promote with
-   `/release`.
+4. **Work the loop.** Get a fresh branch with `/worktree`, orient with
+   `/standup`, build (committing as you go), ship a PR with `/cleanup`, and
+   promote a ready batch with `/release`. The opinions behind that loop are the
+   next section.
 
 ### The skills at a glance
 
@@ -95,6 +98,7 @@ commands — and each sits one step further up a deliberate safety gradient:
 | Skill | What it does | Blast radius |
 |---|---|---|
 | `/setup` | First-run onboarding: checks prereqs (git/uv/gh/tracker key), interviews you, writes a validated `dev-workflow.yml`, points at the daily workflow | Writes one local file (`dev-workflow.yml`); never commits or pushes |
+| `/worktree` | Sets up 2-4 parallel worktree slots (or one linear branch), resets a slot to a fresh branch off the latest trunk, and teaches the branch model | Local branch/worktree surgery; one outward action — deletes REMOTE branches already merged into the trunk (skippable with `--keep-remote`) |
 | `/standup` | Opens a session: board snapshot, what's In Progress to resume, 2-4 recommended starting tickets with one-line whys | **Read-only** — never moves a ticket |
 | `/cleanup` | Closes a session: commit what's left → sync with the base branch → push → open the PR → move the session's finished tickets to Done | Pushes *your feature branch*; merging its PR lands on the base branch and **never deploys** |
 | `/release` | The promotion: absorb hotfixes, test gate, bump `version.file`, tag, open the base→prod PR — then **stops. A human merges; the merge deploys.** Refuses to run at all if `repo.prod_branch` / `deploy.trigger` aren't configured | The **only** skill that touches prod, and it's human-gated at the merge |
@@ -131,7 +135,36 @@ predates that key). Follow the docs in order:
    backoff) over the same image:
    [`skills/ticket-loop/orchestrator/README.md`](skills/ticket-loop/orchestrator/README.md).
 
-## 2. How it's put together
+## 2. The opinionated workflow
+
+The skills aren't neutral — they encode a branch model where **deploys are
+deliberate**. Two long-lived branches, and all real work on short-lived feature
+branches:
+
+- **`repo.base_branch`** (the integration trunk, default `dev`) — feature branches
+  start here and PR back here. **Merging into it never deploys.**
+- **`repo.prod_branch`** (the prod mirror, default `main`) — it advances **only**
+  via the `/release` promotion PR, and **that** merge deploys.
+- **You never commit directly on the trunk or prod** — not even as a solo
+  developer with a single checkout. Every change rides a feature branch.
+- **Hotfixes** branch off prod, PR straight to prod (deploys), then back-merge
+  prod→trunk so the next release doesn't revert them.
+
+The ideal shape is a canonical checkout on the trunk plus **2-4 worktree slots**
+for parallel tickets (one linear checkout works too — same rules). The daily loop:
+
+```
+per ticket:  /worktree ─► /standup ─► work + commit ─► /cleanup ─► PR into trunk (no deploy)
+                (fresh      (pick the                    (open the        │
+                 branch off  ticket)                      PR)             └─ repeat
+                 latest trunk)
+when a batch is ready:  /release ─► trunk→prod PR ─► human merges = DEPLOY
+```
+
+The full narrative behind these opinions — the CI shape, the one-time GitHub
+setup, worktree mechanics — is the [dev-process playbook](dev-process/README.md).
+
+## 3. How it's put together
 
 Everything splits into **three zones** — the framework is generic and shared,
 the target repo owns only its config, and secrets live nowhere in git. Full
@@ -165,16 +198,16 @@ The framework files:
 | [dev-workflow/dw-config.py](dev-workflow/dw-config.py) | Dotted-path config reader shell scripts use (`dw-config.py dev-workflow.yml tracker.team`) |
 | [dev-workflow/dw-board.py](dev-workflow/dw-board.py) | Framework board tool — `dw-board snapshot` renders the board views from Linear, `dw-board prune` reports (config-gated) old Done/Canceled tickets, `dw-board import` bulk-creates issues from a JSON holding file (dry-run unless `--yes`). Team + gates + prune policy from config; `LINEAR_API_KEY` from the env only |
 | [dev-workflow/tracker-adapters.md](dev-workflow/tracker-adapters.md) | The provider seam — canonical verbs (`list_actionable`, `move`, `label`, …) mapped onto a tracker (Linear today; GitHub Issues sketch) |
-| [skills/standup/](skills/standup/) · [skills/cleanup/](skills/cleanup/) · [skills/release/](skills/release/) | The session skills — open a session, close it into a PR, promote to prod. Driven entirely by `dev-workflow.yml` |
+| [skills/worktree/](skills/worktree/) · [skills/standup/](skills/standup/) · [skills/cleanup/](skills/cleanup/) · [skills/release/](skills/release/) | The session skills — fresh worktree/branch, open a session, close it into a PR, promote to prod. Driven entirely by `dev-workflow.yml` |
 | [skills/ticket-loop/](skills/ticket-loop/) | The autonomous agent + its [`docker/`](skills/ticket-loop/docker/) runner packaging |
 | [dev-process/](dev-process/) | The narrative playbook the skills grew out of — two-branch model, worktree slots, daily loop — plus ready-to-copy scripts ([worktree-reset.sh](dev-process/scripts/worktree-reset.sh), [ship-preflight.sh](dev-process/scripts/ship-preflight.sh)) |
 
-## 3. Repo map
+## 4. Repo map
 
 ```
 dev-workflow/
 ├── dev-workflow/            # The framework: config contract + validator + tracker seam
-├── skills/                  # Claude Code plugin skills — standup, cleanup, release, ticket-loop
+├── skills/                  # Claude Code plugin skills — worktree, standup, cleanup, release, ticket-loop
 ├── dev-process/             # The narrative playbook behind the skills (branches, worktrees, loop)
 ├── hooks/                   # Plugin SessionStart hook — auto-orients sessions in configured repos
 ├── scripts/                 # Repo maintenance — bump-version.sh (release version bump + drift check)
@@ -183,14 +216,14 @@ dev-workflow/
 └── site/                    # HTML guide page + assets
 ```
 
-## 4. Extras: the prompt collections
+## 5. Extras: the prompt collections
 
 Before the framework, this repo was a curated set of standalone copy-paste AI
 prompts — context-file generators, a multi-repo audit pipeline, web-performance
 prompts, a project-handover checklist. They still work, no install required,
 and now live in **[`extras/`](extras/README.md)** with their own index.
 
-## 5. Contributing
+## 6. Contributing
 
 This repo is a living collection. Contributions are welcome.
 

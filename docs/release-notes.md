@@ -38,6 +38,28 @@ running many repos on one box.
   then points at the daily worktree workflow. Writes only that one local file — never
   commits, pushes, or moves a ticket. Mentions v2 but enables it only on explicit ask.
 
+### New `/worktree` skill + parameterized worktree-reset.sh
+- **`worktree-reset.sh` is now branch-model-agnostic.** It hardcoded `dev`/`main`
+  throughout; it now reads `WORKTREE_TRUNK`/`WORKTREE_PROD` (defaulting to
+  `dev`/`main`, so existing callers are unchanged) and drives every case guard,
+  `origin/<trunk>` base, `origin/<prod>` hotfix base, sweep, and error line off
+  them. `master` stays a guarded long-lived name; TRUNK==PROD is refused.
+- **New `/worktree` skill** — two modes over that script: BOOTSTRAP offers the
+  canonical-checkout + 2-4 `feature-[a-z]` slot layout and creates them; RESET
+  (the default, from inside a slot) mints a fresh `<slot>-N` off the latest trunk,
+  relinks shared state, sweeps merged branches, installs deps. It reads
+  `repo.base_branch`/`repo.prod_branch`/`quality.bootstrap` and exports them as
+  the script's env vars. The branch opinions are taught in-skill (never work on
+  trunk/prod even with one worktree; feature → PR into base via `/cleanup` (no
+  deploy); `/release` promotes base→prod and the human's merge deploys; hotfixes
+  off prod). Its only outward action is the script's skippable merged-remote sweep;
+  it never pushes, opens PRs, or touches the tracker. Wired into `/setup`'s
+  handoff, the SessionStart brief, and both READMEs.
+- **Root README now states the opinions inline** — a new *The opinionated
+  workflow* section spells out the two-branch rules and the ideal
+  `/worktree`→`/standup`→work→`/cleanup`→`/release` daily loop, instead of only
+  linking the playbook.
+
 ### SessionStart auto-orientation hook
 - A Claude Code SessionStart hook injects a short brief when a session opens in a repo
   that has a `dev-workflow.yml` (skills available + whether the v2 agent is on), and

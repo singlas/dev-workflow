@@ -48,10 +48,10 @@ escape_for_json() {
 }
 
 context="This repo uses dev-workflow (CI, but for ticket work) — a dev-workflow.yml is present at the repo root.
-Session skills: /standup to orient on the board, /cleanup to ship a PR into the base branch, /release to promote to prod, /setup to (re)configure or check prereqs.
+Session skills: /standup to orient on the board, /worktree to start a fresh slot, /cleanup to ship a PR into the base branch, /release to promote to prod, /setup to (re)configure or check prereqs.
 Everything repo-specific (tracker team/roles, branch model, test + lint commands, tightened guardrails) is read from dev-workflow.yml — never hardcode it.
 Local autonomous agent tier (v2, the /ticket-loop skill): ${agent_state}.
-Daily loop: /standup to start, work, /cleanup to ship. The worktree branch model lives in dev-process/README.md."
+Daily loop: /standup to start, /worktree for a fresh branch, work, /cleanup to ship. The worktree branch model lives in dev-process/README.md."
 
 escaped="$(escape_for_json "$context")"
 

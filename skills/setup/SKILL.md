@@ -105,16 +105,21 @@ skill.
 
 Point the user at how they'll actually work day to day — don't duplicate it here:
 
+- **The immediate next step is `/worktree`** — it sets up the worktree slots (or,
+  for a single-checkout developer, just the first fresh feature branch) and, in
+  one pass, teaches the branch opinions this workflow runs on. Send them there
+  now: "Run `/worktree` to set up your slots and get a fresh branch."
 - **Open a session** with `/standup` (board orientation), **close it** with
   `/cleanup` (commit → push → PR into the base branch), **promote to prod** with
   `/release`.
 - The branch model is **worktree-based**: one canonical checkout on the base
   branch plus fixed worktree slots, a fresh auto-numbered branch per slot. The
-  narrative + ready-to-copy scripts live in the **dev-process playbook**
-  (`dev-process/README.md`, and `dev-process/scripts/worktree-reset.sh`). Send
-  them there rather than re-explaining worktrees.
+  `/worktree` skill drives it; the narrative + ready-to-copy scripts live in the
+  **dev-process playbook** (`dev-process/README.md`, and
+  `dev-process/scripts/worktree-reset.sh`).
 
-That's the whole v1 loop: configure once, then standup → work → cleanup.
+That's the whole v1 loop: configure once, then `/worktree` → standup → work →
+cleanup.
 
 ## 5. The autonomous agent (v2) — mention, don't enable
 

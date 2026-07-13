@@ -21,8 +21,9 @@ dev-workflow/
 │   ├── queue-count.py       # Linear queue-depth pre-check (queue_count verb)
 │   ├── test_validate.py     # unittest for validate.py
 │   └── tracker-adapters.md  # canonical verbs → provider mapping (Linear impl)
-├── skills/                  # Claude Code plugin skills — standup, cleanup, release, ticket-loop
-│   ├── standup/  cleanup/  release/   # session skills, driven by dev-workflow.yml
+├── skills/                  # Claude Code plugin skills — setup, worktree, standup, cleanup, release, ticket-loop
+│   ├── setup/  worktree/  standup/  cleanup/  release/  # session skills, driven by dev-workflow.yml
+│                            #   (worktree = the branch/slot skill over dev-process/scripts/worktree-reset.sh)
 │   └── ticket-loop/         # autonomous agent + docker/ runner packaging
 │       └── orchestrator/    # multi-project round-robin scheduler (roster.yml,
 │                            #   adaptive pre-check + backoff, over the same runner)

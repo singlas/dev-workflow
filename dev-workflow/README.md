@@ -107,9 +107,12 @@ The interactive session skills, working locally. Install the plugin
 
 - Run **`/setup`** to write a validated `dev-workflow.yml` (prereq checks +
   interview), or copy [`dev-workflow.example.yml`](dev-workflow.example.yml) by hand.
-- Work the day with **`/standup`** → **`/cleanup`** → **`/release`** (plus
-  **`/blog-from-session`**). The branch model is worktree-based — the playbook +
-  ready-to-copy scripts are in [`../dev-process/README.md`](../dev-process/README.md).
+  Then **`/worktree`** to set up the worktree slots (or first branch) and absorb
+  the branch model.
+- Work the day with **`/worktree`** → **`/standup`** → **`/cleanup`** →
+  **`/release`** (plus **`/blog-from-session`**). The branch model is
+  worktree-based — `/worktree` drives it, and the playbook + ready-to-copy scripts
+  are in [`../dev-process/README.md`](../dev-process/README.md).
 - A **SessionStart hook** auto-orients any session opened in a configured repo
   (and stays silent everywhere else).
 
