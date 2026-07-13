@@ -33,7 +33,7 @@ except ImportError:
 
 ALLOWED_TOP = {"repo", "tracker", "chat", "quality", "version", "deploy",
                "board", "guardrails", "build", "schedule", "hooks", "runtime",
-               "blog", "agent"}
+               "blog", "agent", "repos"}
 REQUIRED = {"repo": ["base_branch", "prod_branch"], "tracker": ["provider", "team", "ticket_prefix"]}
 BASELINE_OFF_LIMITS = [".env*", "*.key", "*.pem", "credentials.json",
                        ".claude/settings*", ".github/workflows/**"]
@@ -192,8 +192,32 @@ def check(data):
     if agent is not None:
         if not isinstance(agent, dict):
             errors.append("agent must be a mapping")
-        elif "enabled" in agent and not isinstance(agent["enabled"], bool):
-            errors.append("agent.enabled must be a boolean (true/false)")
+        else:
+            if "enabled" in agent and not isinstance(agent["enabled"], bool):
+                errors.append("agent.enabled must be a boolean (true/false)")
+            # agent.skill (optional) — a bare skill NAME the runner invokes (the
+            # roster entry's `skill:` overrides it). agent.manager (optional) —
+            # parent/manager mode: the runner does not reset the work tree.
+            if "skill" in agent and not _nonempty_str(agent.get("skill")):
+                errors.append("agent.skill must be a non-empty string when set")
+            if "manager" in agent and not isinstance(agent["manager"], bool):
+                errors.append("agent.manager must be a boolean (true/false)")
+
+    # repos (optional) — the parent-orchestration child map (one product, many
+    # repos under one team/group). A list of mappings, each with a non-empty
+    # string `project` (its Linear Project) and `path` (clone dir under the parent).
+    repos = data.get("repos")
+    if repos is not None:
+        if not isinstance(repos, list) or not repos:
+            errors.append("repos must be a non-empty list when set")
+        else:
+            for i, r in enumerate(repos):
+                if not isinstance(r, dict):
+                    errors.append("repos[%d] must be a mapping" % i)
+                    continue
+                for k in ("project", "path"):
+                    if not _nonempty_str(r.get(k)):
+                        errors.append("repos[%d].%s must be a non-empty string" % (i, k))
 
     # schedule.window format.
     schedule = data.get("schedule")

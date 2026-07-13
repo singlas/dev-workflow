@@ -793,6 +793,27 @@ projects:
 """)
         self.assertFalse(r["projects"][0]["enabled"])
 
+    def test_skill_and_manager_parsed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self._load(tmp, f"""
+projects:
+  - name: alpha
+    work_tree: {tmp}/alpha
+    env_file: {tmp}/alpha.env
+    state_dir: {tmp}/s-alpha
+    skill: ticket-loop-parent
+    manager: true
+  - name: beta
+    work_tree: {tmp}/beta
+    env_file: {tmp}/beta.env
+    state_dir: {tmp}/s-beta
+""")
+        by = {p["name"]: p for p in r["projects"]}
+        self.assertEqual(by["alpha"]["skill"], "ticket-loop-parent")
+        self.assertTrue(by["alpha"]["manager"])
+        self.assertIsNone(by["beta"]["skill"])       # default: no skill override
+        self.assertFalse(by["beta"]["manager"])      # default: not a manager entry
+
     def test_repo_url_branch_forms(self):
         self.assertEqual(orch._repo_url_branch("github.com/o/r"), ("github.com/o/r", "main"))
         self.assertEqual(orch._repo_url_branch({"url": "u", "branch": "b"}), ("u", "b"))

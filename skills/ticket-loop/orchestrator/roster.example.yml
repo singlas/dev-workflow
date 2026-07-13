@@ -43,6 +43,13 @@ projects:
     # enabled: false                     # PAUSE without removing: state kept, marker
                                          # guard skipped (stage before the clone
                                          # exists), scheduler never picks it. Default true.
+    # skill: ticket-loop-parent          # which skill the pass invokes (bare name;
+                                         # the runner namespaces it). Overrides the
+                                         # repo's agent.skill. Default: ticket-loop.
+    # manager: true                      # manager/parent mode — the runner does NOT
+                                         # git-reset this work tree (a parent checkout
+                                         # holds child clones + docs + PM state).
+                                         # Overrides the repo's agent.manager.
     # model: sonnet                      # optional → TICKET_LOOP_MODEL for the pass
     # tz: Asia/Kolkata                   # optional → TICKET_LOOP_TZ
     # window: "09:00-20:00"              # optional; intersected (tighten-only) with

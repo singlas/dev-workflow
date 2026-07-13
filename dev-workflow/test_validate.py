@@ -77,6 +77,40 @@ class ValidateTests(unittest.TestCase):
         errors = _errors_for(cfg)
         self.assertTrue(any("tracker.project" in e for e in errors), errors)
 
+    def test_agent_skill_and_manager_valid_passes(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["agent"] = {"enabled": True, "skill": "ticket-loop-parent", "manager": True}
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_agent_skill_empty_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["agent"] = {"skill": ""}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("agent.skill" in e for e in errors), errors)
+
+    def test_agent_manager_non_bool_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["agent"] = {"manager": "yes"}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("agent.manager" in e for e in errors), errors)
+
+    def test_repos_valid_passes(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["repos"] = [{"project": "pt-api", "path": "pt-api", "url": "https://x/y.git"}]
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_repos_missing_project_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["repos"] = [{"path": "pt-api"}]
+        errors = _errors_for(cfg)
+        self.assertTrue(any("repos[0].project" in e for e in errors), errors)
+
+    def test_repos_empty_list_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["repos"] = []
+        errors = _errors_for(cfg)
+        self.assertTrue(any("repos must be a non-empty list" in e for e in errors), errors)
+
     def test_off_limits_non_list_fails(self):
         cfg = copy.deepcopy(MINIMAL)
         cfg["guardrails"] = {"off_limits": "*.pem"}

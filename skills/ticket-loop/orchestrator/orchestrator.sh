@@ -213,7 +213,7 @@ while :; do
     continue
   fi
 
-  # ACTION=run → PROJECT WORK_TREE ENV_FILE STATE_DIR MODEL PROJECT_TZ CADENCE
+  # ACTION=run → PROJECT WORK_TREE ENV_FILE STATE_DIR MODEL PROJECT_TZ SKILL MANAGER CADENCE
   #              PRECHECK FORCE_FULL TIMEOUT_S
   record() {  # $1 = outcome class
     local RECORD_SH
@@ -284,6 +284,10 @@ while :; do
              TICKET_LOOP_STATE_DIR="$STATE_DIR" )
   [ -n "${MODEL:-}" ]                  && ENV_ARGS+=( TICKET_LOOP_MODEL="$MODEL" )
   [ -n "${PROJECT_TZ:-}" ]             && ENV_ARGS+=( TICKET_LOOP_TZ="$PROJECT_TZ" )
+  # Per-entry mode (roster overrides the repo's own agent.*): which skill the pass
+  # invokes, and manager mode (the runner must NOT reset a parent work tree).
+  [ -n "${SKILL:-}" ]                  && ENV_ARGS+=( DW_SKILL="$SKILL" )
+  [ "${MANAGER:-0}" = 1 ]              && ENV_ARGS+=( DW_MANAGER=1 )
   [ -n "${TICKET_LOOP_MCP_CONFIG:-}" ] && ENV_ARGS+=( TICKET_LOOP_MCP_CONFIG="$TICKET_LOOP_MCP_CONFIG" )
   [ -n "${DW_PLUGIN_DIR:-}" ]          && ENV_ARGS+=( DW_PLUGIN_DIR="$DW_PLUGIN_DIR" )
   # Shared default bot: run-pass sources the env file over this, so a project's

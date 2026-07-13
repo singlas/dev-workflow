@@ -101,6 +101,19 @@ build:
 # repo-level track and is NOT gated by this key.
 # agent:
 #   enabled: false
+#   skill: ticket-loop-parent   # OPTIONAL: which skill a pass invokes (bare name).
+#                               # A roster `skill:` entry overrides this. Default: ticket-loop.
+#   manager: true               # OPTIONAL: manager/parent mode — the runner does NOT
+#                               # git-reset the work tree (a parent checkout holds child
+#                               # clones + docs + PM state). Roster `manager:` overrides this.
+
+# Parent-orchestration child map — one product, many repos under one Linear team +
+# one Telegram group (see docs/superpowers/specs/2026-07-13-parent-orchestration-*).
+# Only meaningful with a manager/parent skill. Each entry: project (its Linear
+# Project) + path (clone dir under the parent) [+ url for seeding].
+# repos:
+#   - { project: pt-api, path: pt-api, url: https://github.com/org/pt-api.git }
+#   - { project: pt-web, path: pt-web, url: https://github.com/org/pt-web.git }
 
 # When the autonomous loop is allowed to run.
 schedule:

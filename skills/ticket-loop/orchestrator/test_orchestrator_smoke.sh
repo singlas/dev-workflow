@@ -22,6 +22,8 @@ projects:
     work_tree: $TMP/root/proj
     env_file: $TMP/agent.env
     state_dir: $TMP/state
+    skill: ticket-loop-parent
+    manager: true
 EOF
 
 # Orchestrator env file (auto-discovered next to the roster): the project's env
@@ -40,6 +42,8 @@ cat > "$TMP/stub-pass.sh" <<'EOF'
 [ "${TELEGRAM_BOT_TOKEN:-}" = "fake-default-token" ] || { echo "FAIL: default bot not injected" >&2; exit 1; }
 [ "${TELEGRAM_SHARED_BOT:-}" = "1" ] || { echo "FAIL: shared-bot flag not set" >&2; exit 1; }
 [ "${CLAUDE_CODE_OAUTH_TOKEN:-}" = "fake-claude-token" ] || { echo "FAIL: common Claude token not injected" >&2; exit 1; }
+[ "${DW_SKILL:-}" = "ticket-loop-parent" ] || { echo "FAIL: roster skill not passed as DW_SKILL" >&2; exit 1; }
+[ "${DW_MANAGER:-}" = "1" ] || { echo "FAIL: roster manager mode not passed as DW_MANAGER" >&2; exit 1; }
 mkdir -p "$TICKET_LOOP_STATE_DIR"
 printf '{"picked":1,"pr_opened":1,"asked":0,"blocked":0,"progressed":true,"error":null}\n' \
   > "$TICKET_LOOP_STATE_DIR/outcome.json"

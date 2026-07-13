@@ -58,10 +58,20 @@ cfg() {  # cfg <dotted.path> [default]
 }
 BASE_BRANCH="$(cfg repo.base_branch dev)"
 
+# Manager/parent mode (roster `manager:` → DW_MANAGER, else agent.manager): the
+# work tree is a PARENT checkout holding child clones + docs + PM state, not a
+# disposable single-repo tree — never reset it (children reset per-child).
+MANAGER="${DW_MANAGER:-$(cfg agent.manager false || true)}"
+case "$MANAGER" in 1|true|yes|on) MANAGER=1 ;; *) MANAGER=0 ;; esac
+
 # ── bring the work tree current with origin/<base> ──
 cd "$DW_WORK_TREE"
-git fetch --quiet origin "$BASE_BRANCH" || echo "WARN: git fetch failed — using current checkout" >&2
-git reset --hard "origin/$BASE_BRANCH" || echo "WARN: git reset failed — using current checkout" >&2
+if [ "$MANAGER" = 1 ]; then
+  echo "manager mode — parent work tree, skipping git reset" >&2
+else
+  git fetch --quiet origin "$BASE_BRANCH" || echo "WARN: git fetch failed — using current checkout" >&2
+  git reset --hard "origin/$BASE_BRANCH" || echo "WARN: git reset failed — using current checkout" >&2
+fi
 
 # ── optional dependency bootstrap (e.g. `uv sync`) so the build subagents' quality
 # gate can run in-container; a failure only warns (the pass still triages/reports). ──

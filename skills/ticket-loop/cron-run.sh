@@ -123,8 +123,14 @@ cd "$DW_WORK_TREE" || { log "FATAL: work tree $DW_WORK_TREE missing"; exit 1; }
 
 # ── keep the work tree current with origin/<base> ──
 # Nothing else edits this tree (the loop's build subagents make their own
-# worktrees), so a hard reset is safe.
-if [ "$RUNNER_INSIDE_WORKTREE" = "1" ]; then
+# worktrees), so a hard reset is safe — EXCEPT in manager/parent mode, where the
+# work tree is a parent checkout holding child clones + docs + PM state and must
+# never be reset (child clones are reset per-child by the parent skill).
+MANAGER="${DW_MANAGER:-$(cfg agent.manager false 2>/dev/null || echo false)}"
+case "$MANAGER" in 1|true|yes|on) MANAGER=1 ;; *) MANAGER=0 ;; esac
+if [ "$MANAGER" = 1 ]; then
+  log "manager mode — parent work tree, skipping git reset"
+elif [ "$RUNNER_INSIDE_WORKTREE" = "1" ]; then
   # Laptop layout: the runner IS part of the work tree, so the reset self-updates it.
   # Guard: only reset once origin/<base> actually carries this wrapper, so a
   # pre-merge window (scripts still on the feature branch) doesn't wipe them.
@@ -184,14 +190,19 @@ fi
 # Skill invocation: repo-local `/ticket-loop` by default. When DW_PLUGIN_DIR is set
 # AND the pinned claude supports --plugin-dir, load the baked plugin and invoke the
 # namespaced skill instead.
-INVOKE="${DW_SKILL_INVOCATION:-/ticket-loop}"
+# Which skill: DW_SKILL_INVOCATION (a full invoke string) is the ultimate
+# override; else a bare skill NAME from DW_SKILL (roster `skill:`) or the repo's
+# agent.skill, defaulting to ticket-loop. The runner namespaces the name.
+SKILL_NAME="${DW_SKILL:-$(cfg agent.skill ticket-loop 2>/dev/null || echo ticket-loop)}"
+[ -n "$SKILL_NAME" ] || SKILL_NAME="ticket-loop"
+INVOKE="${DW_SKILL_INVOCATION:-/$SKILL_NAME}"
 PLUGIN_ARGS=()
 if [ -n "${DW_PLUGIN_DIR:-}" ]; then
   if claude --help 2>/dev/null | grep -q -- --plugin-dir; then
     PLUGIN_ARGS=(--plugin-dir "$DW_PLUGIN_DIR")
-    INVOKE="${DW_SKILL_INVOCATION:-/dev-workflow:ticket-loop}"
+    INVOKE="${DW_SKILL_INVOCATION:-/dev-workflow:$SKILL_NAME}"
   else
-    log "WARN: pinned claude lacks --plugin-dir; falling back to repo-local /ticket-loop"
+    log "WARN: pinned claude lacks --plugin-dir; falling back to repo-local /$SKILL_NAME"
   fi
 fi
 

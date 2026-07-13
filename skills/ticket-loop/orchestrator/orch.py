@@ -90,6 +90,18 @@ DEFAULTS = {
     "crash_park_for": "12h",
 }
 
+def _as_bool(v, default=False):
+    """Coerce a YAML scalar to bool. Missing → default; a quoted string like
+    "no"/"off"/"false"/"0"/"" → False, anything else truthy."""
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() not in ("false", "no", "off", "0", "")
+    return bool(v)
+
+
 _REQUIRED_PROJECT_KEYS = ("name", "work_tree", "env_file", "state_dir")
 _DURATION_KEYS = ("interval", "waiting_interval", "force_full_every",
                   "pass_timeout", "requeue_delay", "crash_park_for")
@@ -134,9 +146,6 @@ def load_roster(path):
         # `enabled: false` pauses a project WITHOUT removing it: state is kept
         # (not pruned), the startup marker guard is skipped (so an entry can be
         # staged before its clone exists), and the scheduler never picks it.
-        en = entry.get("enabled", True)
-        if isinstance(en, str):
-            en = en.strip().lower() not in ("false", "no", "off", "0", "")
         out.append({
             "name": name,
             "work_tree": str(entry["work_tree"]),
@@ -147,7 +156,15 @@ def load_roster(path):
             "window": entry.get("window"),
             "cadence": cadence,
             "interval_s": parse_duration(entry.get("interval", cfg["interval"])),
-            "enabled": bool(en),
+            "enabled": _as_bool(entry.get("enabled", True), True),
+            # `skill` (optional): which skill the pass invokes — a bare skill NAME
+            # (e.g. ticket-loop-parent), the runner namespaces it. Overrides the
+            # repo's own agent.skill. None → the runner's default (ticket-loop).
+            "skill": (str(entry["skill"]).strip() if entry.get("skill") else None),
+            # `manager` (optional): manager/parent mode — the runner must NOT
+            # git-reset the work tree (a parent checkout holds child clones + docs,
+            # it is not a disposable single-repo tree). Overrides repo agent.manager.
+            "manager": _as_bool(entry.get("manager", False)),
             # `repo` (optional): the canonical record of WHICH repo this is — a
             # mapping {url, branch} (or a bare url string). The scheduler does not
             # use it; `seed-plan` reads it to clone the work tree from the roster
@@ -394,6 +411,7 @@ def cmd_next(args):
                 "WORK_TREE": p["work_tree"], "ENV_FILE": p["env_file"],
                 "STATE_DIR": p["state_dir"], "MODEL": p["model"] or "",
                 "PROJECT_TZ": p["tz"] or "", "CADENCE": p["cadence"],
+                "SKILL": p.get("skill") or "", "MANAGER": 1 if p.get("manager") else 0,
                 "PRECHECK": 1 if d["precheck"] else 0,
                 "FORCE_FULL": 1 if d["force_full"] else 0,
                 "TIMEOUT_S": roster["cfg"]["pass_timeout_s"],
