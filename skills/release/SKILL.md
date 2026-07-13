@@ -49,11 +49,20 @@ or `.github/workflows/**`.
 
 ## Per-repo configuration (`dev-workflow.yml`)
 
-Resolve every value from `dev-workflow.yml` with
-`dw-config dev-workflow.yml <dotted.path> [default]`. (Three ways to resolve it:
-on PATH in a consuming repo after a hardened install; as a plugin install,
-`uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" dev-workflow.yml <dotted.path>`;
-from a framework checkout, `uv run dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.)
+**Run this preamble ONCE at the start** to resolve the config reader and load every
+key this skill uses; the list below explains each. (`release` still refuses unless
+`repo.prod_branch` and `deploy.trigger` both come back set — see the safety rules
+above.)
+
+```bash
+if command -v dw-config >/dev/null 2>&1; then DW="dw-config"                                            # hardened install (PATH)
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
+else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
+[ -f dev-workflow.yml ] \
+  && $DW dev-workflow.yml --batch repo.base_branch repo.prod_branch deploy.trigger deploy.announce \
+       version.file version.scheme version.changelog quality.test \
+  || echo "no dev-workflow.yml — STOP: release needs prod_branch + deploy.trigger configured"
+```
 
 - `repo.base_branch` — the trunk you release *from*. `repo.prod_branch` — the prod
   mirror you release *to* (**required**; refuse if unset).

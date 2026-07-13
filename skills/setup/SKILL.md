@@ -54,8 +54,17 @@ not a stop (the config can still be written):
 ## 2. Write dev-workflow.yml — only if it's missing
 
 **If `dev-workflow.yml` already exists at the repo root:** do NOT overwrite it.
-Validate it (step 3) and report; offer to walk through any missing keys the
-validator flags, editing in place with the human's confirmation.
+Load its current values in one call and report them, then validate (step 3); offer
+to walk through any missing keys the validator flags, editing in place with the
+human's confirmation.
+
+```bash
+if command -v dw-config >/dev/null 2>&1; then DW="dw-config"                                            # hardened install (PATH)
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
+else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
+$DW dev-workflow.yml --batch repo.base_branch repo.prod_branch tracker.provider tracker.team \
+  tracker.ticket_prefix quality.test quality.lint agent.enabled=false
+```
 
 **If it's absent:** interview the user for the required values, then write the
 file. Start from the bundled example so the annotations and optional sections

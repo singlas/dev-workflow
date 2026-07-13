@@ -25,13 +25,21 @@ only local state is `state.json` in the loop's state dir (the Telegram offset, t
 ## Per-repo configuration (`dev-workflow.yml`)
 
 **Read the repo's `dev-workflow.yml` at the target-repo root at the start of each
-pass** (a shell caller resolves one value with
-`dw-config dev-workflow.yml <dotted.path> [default]` — on PATH in a consuming repo
-after a hardened install; `uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py"
-dev-workflow.yml <dotted.path>` as a plugin install; or `uv run
-dev-workflow/dw-config.py dev-workflow.yml <dotted.path>` from a framework checkout). It
-names everything repo-specific — **never hardcode these; resolve the role, then use
-the repo's own name:**
+pass.** Run this preamble ONCE to resolve the config reader and load every key the
+pass uses; the list below explains each. **Never hardcode these; resolve the role,
+then use the repo's own name:**
+
+```bash
+if command -v dw-config >/dev/null 2>&1; then DW="dw-config"                                            # hardened install (PATH)
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
+else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
+[ -f dev-workflow.yml ] \
+  && $DW dev-workflow.yml --batch tracker.team tracker.roles.queue.label tracker.roles.queue.states \
+       tracker.roles.blocked.label tracker.roles.exclude.labels tracker.roles.done.state \
+       repo.base_branch repo.prod_branch quality.test quality.lint build.model build.cap_per_pass \
+       guardrails.diff_budget.max_lines guardrails.diff_budget.max_files \
+  || echo "no dev-workflow.yml — cannot run a pass; tell the user to run /setup"
+```
 
 - **Tracker** — `tracker.team` (the team/workspace), `tracker.roles`:
   - **queue** = `roles.queue.label` (e.g. `agent`) + `roles.queue.states`

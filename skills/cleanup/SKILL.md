@@ -27,11 +27,20 @@ explicit authorization to push and open a PR.
 
 ## Per-repo configuration (`dev-workflow.yml`)
 
-Resolve every repo-specific value from `dev-workflow.yml` with
-`dw-config dev-workflow.yml <dotted.path> [default]`. (Three ways to resolve it:
-on PATH in a consuming repo after a hardened install; as a plugin install,
-`uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" dev-workflow.yml <dotted.path>`;
-from a framework checkout, `uv run dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.)
+**Run this preamble ONCE at the start** to resolve the config reader and load every
+key this skill uses; the list below explains each. No `dev-workflow.yml` → the
+preamble says so and the missing-config fallbacks in the procedure take over.
+
+```bash
+if command -v dw-config >/dev/null 2>&1; then DW="dw-config"                                            # hardened install (PATH)
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
+else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
+[ -f dev-workflow.yml ] \
+  && $DW dev-workflow.yml --batch repo.base_branch repo.prod_branch quality.lint quality.test \
+       quality.bootstrap version.changelog tracker.team tracker.roles.done.state \
+       tracker.roles.exclude.labels blog.skill blog.posts_dir=docs/blog \
+  || echo "no dev-workflow.yml — using the skill's missing-config fallbacks"
+```
 
 - `repo.base_branch` — the integration trunk every feature PR targets. Merging a
   PR into it does **not** deploy.

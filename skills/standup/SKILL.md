@@ -26,13 +26,22 @@ Progress, don't open worktrees. Surface, recommend, then let the human pick.
 
 ## Per-repo configuration (`dev-workflow.yml`)
 
-Everything repo-specific comes from `dev-workflow.yml` at the target-repo root —
-resolve a value with `dw-config dev-workflow.yml <dotted.path> [default]`.
-(Three ways to resolve `dw-config`: on PATH in a consuming repo after a hardened
-install; as a plugin install, `uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py"
-dev-workflow.yml <dotted.path>`; from a framework checkout, `uv run
-dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`.) Never hardcode a team,
-label, state, or command:
+Everything repo-specific comes from `dev-workflow.yml` at the target-repo root.
+**Run this preamble ONCE at the start** to resolve the config reader and load every
+key this skill uses; the list below explains each. No `dev-workflow.yml` → the
+preamble says so and the missing-config fallbacks in the procedure take over.
+
+```bash
+if command -v dw-config >/dev/null 2>&1; then DW="dw-config"                                            # hardened install (PATH)
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
+else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
+[ -f dev-workflow.yml ] \
+  && $DW dev-workflow.yml --batch board.snapshot board.views tracker.team tracker.ticket_prefix \
+       tracker.roles.exclude.labels tracker.roles.queue.states \
+  || echo "no dev-workflow.yml — using the skill's missing-config fallbacks"
+```
+
+Never hardcode a team, label, state, or command:
 
 - `board.snapshot` — the command that regenerates the board views (e.g. a
   tracker-export script). `board.views` — the directory it writes them to.
@@ -51,10 +60,8 @@ provider (Linear today). Ticket keys below use `ABC-123` as a stand-in.
 Regenerate the snapshot so the views are current — never reason off a stale
 `board.views`:
 
-```bash
-dw-config dev-workflow.yml board.snapshot   # -> the command
-# run that command
-```
+Run the `board.snapshot` command loaded by the preamble (the value of
+`board.snapshot`), then read the generated views.
 
 Then read the generated views under `board.views` — at minimum the
 In-Progress + Todo view (the primary input), plus whatever gate/milestone and

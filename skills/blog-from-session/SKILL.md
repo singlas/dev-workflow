@@ -24,11 +24,18 @@ that stays a deliberate human step (see *Publishing* below).
 
 ## Per-repo configuration (`dev-workflow.yml`)
 
-Resolve config with `dw-config dev-workflow.yml <dotted.path> [default]` (three
-ways to resolve it: on PATH in a consuming repo after a hardened install; as a
-plugin install, `uv run "${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py"
-dev-workflow.yml <dotted.path>`; from a framework checkout, `uv run
-dev-workflow/dw-config.py dev-workflow.yml <dotted.path>`):
+**Run this preamble ONCE at the start** to resolve the config reader and load the
+keys this skill uses; the list below explains each. No `dev-workflow.yml` → the
+default `docs/blog/` applies and there's no publish command.
+
+```bash
+if command -v dw-config >/dev/null 2>&1; then DW="dw-config"                                            # hardened install (PATH)
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
+else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
+[ -f dev-workflow.yml ] \
+  && $DW dev-workflow.yml --batch blog.posts_dir=docs/blog blog.publish \
+  || echo "no dev-workflow.yml — writing to docs/blog/, no publish command"
+```
 
 - `blog.posts_dir` — where the draft is written. **Default `docs/blog/`** when
   unset.
