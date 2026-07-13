@@ -23,6 +23,13 @@ Subcommands:
                                       use to grab a new group's chat id. Does not consume updates.
 
 Env (from the environment or repo-root .env): TELEGRAM_BOT_TOKEN, AGENT_TELEGRAM_CHAT_ID.
+TELEGRAM_SHARED_BOT=1 switches poll/peek to shared-bot (no-ack) mode: the bot token
+is shared by several projects (one group each), so getUpdates is NEVER called with
+an offset — an offset acks updates bot-wide and would destroy the other projects'
+pending messages. Each project instead filters to its own chat and keeps a local
+floor in state.json `offset`. Consequences: updates expire server-side after 24h
+(same retention the acked flow has), and the scan window is Telegram's first 100
+unacked updates — fine for a handful of low-traffic groups, wrong for busy ones.
 State dir: <repo>/.agent-loop by default; override with TICKET_LOOP_STATE_DIR (an
 absolute path, or one relative to the repo root). Holds state.json
 {offset, questions: {message_id: {ticket, text, asked_at}}} + downloaded media —
@@ -43,6 +50,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -89,6 +97,13 @@ def load_env() -> None:
         key = key.strip()
         value = value.strip().strip("'\"")
         os.environ.setdefault(key, value)
+
+
+def shared_bot() -> bool:
+    """True when TELEGRAM_SHARED_BOT marks this bot token as shared across
+    projects — poll/peek must then never pass `offset` to getUpdates (no acks;
+    see the module docstring)."""
+    return os.environ.get("TELEGRAM_SHARED_BOT", "").strip().lower() in ("1", "true", "yes")
 
 
 def require_env(name: str) -> str:
@@ -208,13 +223,17 @@ def cmd_poll(args: argparse.Namespace) -> None:
     chat_id = require_env("AGENT_TELEGRAM_CHAT_ID")
     state = load_state()
     questions = state.setdefault("questions", {})
-    updates = api(
-        "getUpdates",
-        {"offset": state.get("offset", 0), "timeout": args.timeout, "allowed_updates": '["message"]'},
-        http_timeout=args.timeout + 15,
-    )
+    shared = shared_bot()
+    started = time.monotonic()
+    params = {"timeout": args.timeout, "allowed_updates": '["message"]'}
+    if not shared:
+        params["offset"] = state.get("offset", 0)
+    updates = api("getUpdates", params, http_timeout=args.timeout + 15)
+    floor = state.get("offset", 0)
     emitted = []
     for update in updates:
+        if shared and update["update_id"] < floor:
+            continue  # scanned (and skipped or processed) in an earlier no-ack pass
         state["offset"] = update["update_id"] + 1
         msg = update.get("message")
         if not msg or str(msg.get("chat", {}).get("id")) != chat_id:
@@ -245,6 +264,13 @@ def cmd_poll(args: argparse.Namespace) -> None:
     batch_path.parent.mkdir(parents=True, exist_ok=True)
     batch_path.write_text(json.dumps(emitted, ensure_ascii=False, indent=2) + "\n")
     save_state(state)
+    if shared and updates and not emitted and args.timeout > 0:
+        # In no-ack mode a permanently-pending foreign update makes getUpdates
+        # return instantly, so a caller's poll loop would spin; sleep out the
+        # remainder of the requested long-poll window instead.
+        remaining = args.timeout - (time.monotonic() - started)
+        if remaining > 0:
+            time.sleep(remaining)
     for line in emitted:
         print(json.dumps(line, ensure_ascii=False))
 
@@ -256,16 +282,19 @@ def cmd_peek(_args: argparse.Namespace) -> None:
     in the agent group. Used by the orchestrator pre-check to catch a human poke
     ("stop", "urgent: X") on an otherwise idle project; safe by construction ONLY
     while a single consumer drives this bot (the orchestrator, after any per-project
-    cron is decommissioned)."""
+    cron is decommissioned). In shared-bot mode the offset is never sent at all —
+    the local floor filters instead (module docstring)."""
     chat_id = require_env("AGENT_TELEGRAM_CHAT_ID")
     state = load_state()
-    updates = api(
-        "getUpdates",
-        {"offset": state.get("offset", 0), "timeout": 0, "allowed_updates": '["message"]'},
-        http_timeout=15,
-    )
+    params = {"timeout": 0, "allowed_updates": '["message"]'}
+    if not shared_bot():
+        params["offset"] = state.get("offset", 0)
+    updates = api("getUpdates", params, http_timeout=15)
+    floor = state.get("offset", 0)
     count = 0
     for update in updates:
+        if shared_bot() and update["update_id"] < floor:
+            continue
         msg = update.get("message")
         if not msg or str(msg.get("chat", {}).get("id")) != chat_id:
             continue

@@ -24,8 +24,11 @@ Design: `docs/superpowers/specs/2026-07-11-ticket-loop-orchestrator-design.md`.
 orch.py next            → run <project>, or sleep to min(next_eligible)
   memory gate           → MemAvailable < 2.5 GiB? skip turn (short requeue)
   window                → roster window ∩ repo schedule.window (skip ≠ ladder)
-pre-check (adaptive)    → queue-count.py (Linear depth) + open questions
-                          + telegram.py peek (read-only) — all idle? back off
+pre-check (adaptive)    → queue-count.py (Linear depth) + telegram.py peek
+                          (read-only) — both idle? back off. Open questions are
+                          NOT a signal: an answer IS a pending message the peek
+                          sees, so an unanswered question costs zero passes
+                          (the 8h forced-full pass is the drift backstop)
 orch.py pass-start      → crash write-ahead
 run-pass.sh (timeout,   → the unchanged per-pass runner, child env scoped to
   process-group kill)     ONLY this project's DW_ENV_FILE/WORK_TREE/STATE_DIR
@@ -101,8 +104,11 @@ into the pass environment. Minimum contents:
 
     LINEAR_API_KEY=…            # tracker MCP header + queue-count pre-check
     GH_TOKEN=…                  # fine-grained per-repo PAT (see onboarding §PAT)
-    TELEGRAM_BOT_TOKEN=…        # this project's DEDICATED bot
-    AGENT_TELEGRAM_CHAT_ID=…
+    AGENT_TELEGRAM_CHAT_ID=…    # this project's own group (always per-project)
+    TELEGRAM_BOT_TOKEN=…        # OPTIONAL: a dedicated bot. Omit it and the
+                                # orchestrator injects DEFAULT_TELEGRAM_BOT_TOKEN
+                                # from orch.env in shared (no-ack) mode — a new
+                                # tenant then needs only a group + chat id
     CLAUDE_CODE_OAUTH_TOKEN=…   # from `claude setup-token` — headless auth, no login
     # only if the repo's test suite needs a DB (see step 5):
     DATABASE_URL=postgres://<project>_agent:<pw>@127.0.0.1:5432/<project>_agent
@@ -223,7 +229,20 @@ means the first poll re-drains up to 24h of old group messages as new. Two
 schedulers must never drive one project — the singleton lock is a safety net,
 not a license.
 
-### 10. Run + watch
+### 10. Orchestrator env file + run + watch
+
+The orchestrator's own (non-project) config lives in `orch.env` next to the
+roster on the volume — no `-e` flags in `docker run`, nothing secret in
+`docker inspect`. Master copy in `.local/orch.env`, same `cat >` push as §4:
+
+    ORCH_TELEGRAM_BOT_TOKEN=…      # ops alert channel (🚨 escalations)
+    ORCH_TELEGRAM_CHAT_ID=…
+    DEFAULT_TELEGRAM_BOT_TOKEN=…   # shared fallback bot for tenants without
+                                   # their own (see onboarding §3)
+
+    docker run --rm -i --user root -v dw-agent:/home/agent dw-agent:<pin> bash -c \
+      'cat > /home/agent/orch.env && chown 10001:10001 /home/agent/orch.env && chmod 600 /home/agent/orch.env' \
+      < .local/orch.env
 
     docker run -d --name dw-orchestrator \
       --restart unless-stopped --init \
@@ -232,7 +251,6 @@ not a license.
       --stop-timeout 5460 \
       --log-opt max-size=10m --log-opt max-file=3 \
       -v dw-agent:/home/agent \
-      -e ORCH_TELEGRAM_BOT_TOKEN=<ops bot> -e ORCH_TELEGRAM_CHAT_ID=<ops group> \
       dw-agent:<pin> /opt/dev-workflow/bin/orchestrator.sh
 
 Notes:
@@ -240,9 +258,8 @@ Notes:
   section). `--memory-swap` == `--memory`: no extra swap beyond RAM.
 - `--init` + the SIGTERM drain: `docker stop` lets the current pass finish or
   hit its timeout — hence the generous `--stop-timeout` (> pass_timeout).
-- The ops channel env vars are the ONLY secrets in the orchestrator's own env
-  (visible in `docker inspect` — accepted on a single-owner box); per-project
-  secrets live in the per-project env files, sourced by each pass.
+- Legacy `-e ORCH_TELEGRAM_*` flags still work and win over `orch.env`;
+  per-project secrets stay in the per-project env files, sourced by each pass.
 - `docker logs -f dw-orchestrator` is the live dashboard (one line per turn) —
   it goes QUIET for minutes while a pass runs; the pass detail streams to
   `/home/agent/state/<name>/logs/ticket-loop-cron.log` instead:
@@ -264,10 +281,26 @@ The loop is tracker-driven; a project can't be round-robined until it has:
 1. `dev-workflow.yml` at its repo root (validate: `uv run dev-workflow/validate.py <file>`).
 2. A Linear team with the queue/blocked/exclude/done roles mapped in
    `tracker.roles`, and at least one eligible ticket.
-3. A Telegram group + a **dedicated** bot (own token + chat id — never share a
-   bot across projects: getUpdates offsets contend). Get the chat id: add the
-   bot to the group, send one message, run `python3 skills/ticket-loop/telegram.py
-   discover` with the bot's token in env.
+3. A Telegram **group of its own** (chat ids are always per-project). The bot
+   is optional: with `DEFAULT_TELEGRAM_BOT_TOKEN` in `orch.env`, just add the
+   default bot to the new group and set `AGENT_TELEGRAM_CHAT_ID` — the
+   orchestrator injects the shared bot in **no-ack mode** (`telegram.py` then
+   never sends a getUpdates offset; a shared stream must never be acked by one
+   project, that destroys the siblings' pending messages). A project may still
+   bring its own `TELEGRAM_BOT_TOKEN` (dedicated mode, offset-acked) — right
+   for high-traffic groups, since shared mode scans only Telegram's first 100
+   unacked updates. Never point two ROSTER projects at one *group*, and never
+   share a bot that anything outside this orchestrator also polls.
+   Get the chat id: add the bot to the group, send one message, run
+   `python3 skills/ticket-loop/telegram.py discover` with the bot's token in env.
+   - **Group privacy mode (bites silently):** BotFather bots default to privacy
+     ON in groups — they receive ONLY `/commands` and *replies to their own
+     messages*, so a plain `"RAS-5 go"` answer never reaches the bot at all.
+     Fix once per bot: BotFather → `/setprivacy` → **Disable**, then remove +
+     re-add the bot to each group (or skip the re-add dance by making the bot a
+     group **admin** — admins always see everything). Symptom when you forget:
+     answers show ✓✓ in Telegram, passes keep classifying `waiting`, and the
+     bot's `getWebhookInfo` shows `pending_update_count: 0`.
 4. **A fine-grained per-repo `GH_TOKEN`.** Gotchas learned the hard way:
    - The token page's *Resource owner* dropdown only lists orgs that have
      **enabled** fine-grained PATs — flip it first at

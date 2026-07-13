@@ -29,8 +29,10 @@ projects:
   - name: niptao
     work_tree: /home/agent/niptao        # dedicated agent clone — NEVER the prod checkout
     env_file: /home/agent/niptao.env     # 600; LINEAR_API_KEY, GH_TOKEN (per-repo
-                                         # fine-grained PAT!), TELEGRAM_BOT_TOKEN,
-                                         # AGENT_TELEGRAM_CHAT_ID
+                                         # fine-grained PAT!), AGENT_TELEGRAM_CHAT_ID;
+                                         # TELEGRAM_BOT_TOKEN optional — omitted, the
+                                         # orchestrator injects orch.env's
+                                         # DEFAULT_TELEGRAM_BOT_TOKEN (shared, no-ack)
     state_dir: /home/agent/state/niptao  # state.json, loop.lock, logs, outcome.json
     # model: sonnet                      # optional → TICKET_LOOP_MODEL for the pass
     # tz: Asia/Kolkata                   # optional → TICKET_LOOP_TZ

@@ -382,3 +382,26 @@ project can't be round-robined until it has:
 - **Rate-limit pool** — confirm whether niptao's runtime `claude -p` shares an
   account/rate-limit pool with the loop's OAuth token (a dev pass could throttle
   prod). One sentence to verify at rollout.
+
+## Amendments (2026-07-13, from first-week production data)
+
+- **Pre-check questions-signal removed.** Field data (23 `waiting` outcomes/day,
+  ~43M cache-read tokens) showed "open questions → run the pass, a human may
+  have answered" burns a full claude pass every `waiting_interval` for as long
+  as a question sits unanswered — and it is redundant: an answer IS an
+  unconsumed update, which the read-only `peek` already detects precisely. The
+  pre-check is now queue-count + peek only; an unanswered question costs zero
+  passes until the human replies (8h forced-full remains the drift backstop).
+- **`orch.env` + shared default bot.** Orchestrator-level config
+  (`ORCH_TELEGRAM_*`, `DEFAULT_TELEGRAM_BOT_TOKEN`) moved from `docker run -e`
+  into `<roster dir>/orch.env`. Projects without their own `TELEGRAM_BOT_TOKEN`
+  get the default bot injected in **shared (no-ack) mode**: `telegram.py` never
+  sends a getUpdates offset (an offset acks bot-wide and would destroy sibling
+  projects' pending messages) and filters on chat id + a local floor instead.
+  Constraints: Telegram's 24h update retention (unchanged vs the acked flow)
+  and a 100-unacked-update scan window — dedicated bots stay first-class for
+  busy groups. New-tenant chat setup shrinks to: create group, add default bot,
+  record `AGENT_TELEGRAM_CHAT_ID`.
+- **BotFather group-privacy gotcha** (bit rasa on day 2): default privacy ON
+  delivers only /commands and replies-to-bot; plain `"RAS-5 go"` answers never
+  reach the bot. Runbook now mandates /setprivacy Disable (or bot-as-admin).

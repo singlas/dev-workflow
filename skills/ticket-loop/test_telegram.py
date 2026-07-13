@@ -257,8 +257,8 @@ class TestCmdPeek(unittest.TestCase):
             telegram.cmd_peek(argparse.Namespace())
         return buf.getvalue().strip()
 
-    def msg(self, chat="-100777", bot=False):
-        return {"update_id": 101, "message": {
+    def msg(self, chat="-100777", bot=False, uid=101):
+        return {"update_id": uid, "message": {
             "message_id": 5, "chat": {"id": int(chat)},
             "from": {"is_bot": bot, "username": "u"}, "text": "hi"}}
 
@@ -277,6 +277,92 @@ class TestCmdPeek(unittest.TestCase):
     def test_empty(self):
         self.fake_api([])
         self.assertEqual(self.run_peek(), "0")
+
+    def test_shared_mode_no_offset_param_floor_filters(self):
+        """Shared bot: getUpdates must NOT carry an offset (an offset acks
+        bot-wide, destroying sibling projects' messages); the stored offset acts
+        as a local floor instead."""
+        os.environ["TELEGRAM_SHARED_BOT"] = "1"
+        try:
+            self.fake_api([self.msg(uid=99), self.msg(uid=150)])  # floor is 100
+            self.assertEqual(self.run_peek(), "1")
+            self.assertNotIn("offset", self.api_params)
+        finally:
+            os.environ.pop("TELEGRAM_SHARED_BOT", None)
+
+
+class TestCmdPollShared(unittest.TestCase):
+    """Shared-bot (no-ack) poll: no offset param to getUpdates, updates below the
+    local floor are skipped, foreign-chat updates advance the floor but emit
+    nothing, and an all-foreign batch sleeps out the long-poll window instead of
+    letting the caller spin."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.state_path = Path(self._tmp.name) / "state.json"
+        self._orig_state_path = telegram.STATE_PATH
+        telegram.STATE_PATH = self.state_path
+        self.state_path.write_text(json.dumps({"offset": 100, "questions": {}}))
+        self._orig_api = telegram.api
+        os.environ["AGENT_TELEGRAM_CHAT_ID"] = "-100777"
+        os.environ["TELEGRAM_SHARED_BOT"] = "1"
+        self.api_params = None
+        self._orig_sleep = telegram.time.sleep
+        self.slept = []
+        telegram.time.sleep = self.slept.append
+
+    def tearDown(self):
+        telegram.STATE_PATH = self._orig_state_path
+        telegram.api = self._orig_api
+        telegram.time.sleep = self._orig_sleep
+        os.environ.pop("AGENT_TELEGRAM_CHAT_ID", None)
+        os.environ.pop("TELEGRAM_SHARED_BOT", None)
+        self._tmp.cleanup()
+
+    def fake_api(self, updates):
+        def _api(method, params, **kw):
+            self.assertEqual(method, "getUpdates")
+            self.api_params = params
+            return updates
+        telegram.api = _api
+
+    def upd(self, uid, chat="-100777", text="hi"):
+        return {"update_id": uid, "message": {
+            "message_id": uid, "chat": {"id": int(chat)},
+            "from": {"is_bot": False, "username": "u", "id": 7}, "text": text}}
+
+    def run_poll(self, timeout=25):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            telegram.cmd_poll(argparse.Namespace(timeout=timeout))
+        return [json.loads(line) for line in buf.getvalue().splitlines()]
+
+    def read_offset(self):
+        return json.loads(self.state_path.read_text())["offset"]
+
+    def test_no_offset_floor_skip_and_local_advance(self):
+        self.fake_api([self.upd(99), self.upd(150, chat="-42"), self.upd(151)])
+        out = self.run_poll()
+        self.assertNotIn("offset", self.api_params)
+        self.assertEqual([m["message_id"] for m in out], [151])  # 99 < floor, -42 foreign
+        self.assertEqual(self.read_offset(), 152)               # local floor only
+        self.assertEqual(self.slept, [])                        # emitted → no pacing sleep
+
+    def test_all_foreign_batch_paces_instead_of_spinning(self):
+        self.fake_api([self.upd(150, chat="-42")])
+        out = self.run_poll(timeout=25)
+        self.assertEqual(out, [])
+        self.assertEqual(len(self.slept), 1)
+        self.assertGreater(self.slept[0], 0)
+        self.assertEqual(self.read_offset(), 151)  # scanned foreign ids don't re-scan
+
+    def test_unshared_poll_still_acks_via_offset(self):
+        os.environ.pop("TELEGRAM_SHARED_BOT", None)
+        self.fake_api([self.upd(150)])
+        out = self.run_poll()
+        self.assertEqual(self.api_params["offset"], 100)
+        self.assertEqual([m["message_id"] for m in out], [150])
+        self.assertEqual(self.read_offset(), 151)
 
 
 if __name__ == "__main__":

@@ -11,16 +11,24 @@
 #
 # Secret scoping: this process holds NO project secrets. Each pass — and each
 # pre-check — runs in a child that sources only that project's env file; the
-# orchestrator's own env carries at most the OPS alert channel creds.
+# orchestrator's own env carries at most the OPS alert channel creds and the
+# shared default Telegram bot (a chat credential shared across projects by design).
 #
 # stdout is the live dashboard: one decision line per turn (`docker logs -f`).
 #
 # Env:
 #   ORCH_ROSTER              roster.yml           (default /home/agent/roster.yml)
 #   ORCH_STATE_DIR           orch state dir       (default <roster dir>/orch)
+#   ORCH_ENV_FILE            orchestrator env file (default <roster dir>/orch.env);
+#                            holds the three keys below so `docker run` needs no -e —
+#                            explicit environment still wins over the file
 #   ORCH_RUN_PASS            per-pass runner override (tests; default sibling run-pass.sh)
 #   ORCH_MAX_TURNS           exit after N turns   (tests; default: run forever)
 #   ORCH_TELEGRAM_BOT_TOKEN / ORCH_TELEGRAM_CHAT_ID   optional ops alert channel
+#   DEFAULT_TELEGRAM_BOT_TOKEN   fallback bot for projects whose env file has no
+#                            TELEGRAM_BOT_TOKEN of its own — those run telegram.py
+#                            in shared (no-ack) mode; a new tenant then only needs
+#                            its own group + AGENT_TELEGRAM_CHAT_ID
 #   TICKET_LOOP_MCP_CONFIG / DW_PLUGIN_DIR / DW_PYTHON  forwarded to each pass when set
 #
 # Control surface: `touch <ORCH_STATE_DIR>/run-now` (optionally echo a project
@@ -52,6 +60,18 @@ mkdir -p "$ORCH_STATE_DIR"
 STATE_FILE="$ORCH_STATE_DIR/orch-state.json"
 RUN_NOW_FILE="$ORCH_STATE_DIR/run-now"
 
+# Orchestrator-level env file: ops alert channel + the shared default bot live
+# here instead of `docker run -e` flags. Explicit environment wins over the file.
+ORCH_ENV_FILE="${ORCH_ENV_FILE:-$(dirname "$ROSTER")/orch.env}"
+if [ -f "$ORCH_ENV_FILE" ]; then
+  _bot="${ORCH_TELEGRAM_BOT_TOKEN:-}" _chat="${ORCH_TELEGRAM_CHAT_ID:-}" _dflt="${DEFAULT_TELEGRAM_BOT_TOKEN:-}"
+  set -a; . "$ORCH_ENV_FILE"; set +a
+  [ -n "$_bot" ]  && ORCH_TELEGRAM_BOT_TOKEN="$_bot"
+  [ -n "$_chat" ] && ORCH_TELEGRAM_CHAT_ID="$_chat"
+  [ -n "$_dflt" ] && DEFAULT_TELEGRAM_BOT_TOKEN="$_dflt"
+  unset _bot _chat _dflt
+fi
+
 # Python runner for orch.py (PEP 723 pyyaml): same dance as cron-run.sh.
 if [ -n "${DW_PYTHON:-}" ]; then PY="$DW_PYTHON"
 elif command -v uv >/dev/null 2>&1; then PY="uv run --quiet --no-project"
@@ -72,9 +92,21 @@ ops_alert() {
   fi
 }
 
-project_alert() {  # $1 env_file, $2 state_dir, $3 message — the project's own bot
+# Call INSIDE a subshell after sourcing a project's env file: projects that
+# bring no TELEGRAM_BOT_TOKEN of their own fall back to the shared default bot,
+# and TELEGRAM_SHARED_BOT=1 switches telegram.py to no-ack mode — one project
+# offset-acking a shared bot's getUpdates stream would destroy the other
+# projects' pending messages.
+tg_fallback() {
+  if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${DEFAULT_TELEGRAM_BOT_TOKEN:-}" ]; then
+    export TELEGRAM_BOT_TOKEN="$DEFAULT_TELEGRAM_BOT_TOKEN" TELEGRAM_SHARED_BOT=1
+  fi
+}
+
+project_alert() {  # $1 env_file, $2 state_dir, $3 message — the project's chat bot
   [ -n "$TELEGRAM" ] || return 0
   ( set -a; . "$1"; set +a
+    tg_fallback
     TICKET_LOOP_STATE_DIR="$2" python3 "$TELEGRAM" send "$3" ) >/dev/null 2>&1 \
     || log "WARN: project alert failed to send"
 }
@@ -201,7 +233,11 @@ while :; do
   fi
 
   if [ "${PRECHECK:-0}" = 1 ]; then
-    # Cheap pre-check (spec §3): queue depth + open questions + read-only peek.
+    # Cheap pre-check (spec §3): queue depth + read-only peek. Open questions
+    # are deliberately NOT a signal: an answer a human sent is an unconsumed
+    # update the peek sees, so "questions still open" alone means nobody has
+    # answered yet — running a pass to re-check would burn a full claude pass
+    # to learn nothing (the 8h forced-full pass remains the drift backstop).
     # queue-count failures FAIL OPEN (run the pass — it is the source of truth,
     # and a real outage then surfaces as a loud error class, not a silent skip).
     SIGNAL=0 WHY="no work signal"
@@ -213,19 +249,14 @@ while :; do
       *)           SIGNAL=1; WHY="queue depth $QC" ;;
     esac
     if [ "$SIGNAL" = 0 ] && [ -n "$TELEGRAM" ]; then
-      QN="$(TICKET_LOOP_STATE_DIR="$STATE_DIR" python3 "$TELEGRAM" questions --json 2>/dev/null \
-            | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)"
-      case "$QN" in (*[!0-9]*|'') QN=0 ;; esac
-      [ "$QN" -gt 0 ] && { SIGNAL=1; WHY="$QN open question(s) — a human may have answered"; }
-    fi
-    if [ "$SIGNAL" = 0 ] && [ -n "$TELEGRAM" ]; then
       PK="$( ( set -a; . "$ENV_FILE"; set +a
+               tg_fallback
                TICKET_LOOP_STATE_DIR="$STATE_DIR" python3 "$TELEGRAM" peek ) 2>/dev/null || echo 0 )"
       case "$PK" in (*[!0-9]*|'') PK=0 ;; esac
       [ "$PK" -gt 0 ] && { SIGNAL=1; WHY="$PK unread group message(s)"; }
     fi
     if [ "$SIGNAL" = 0 ]; then
-      log "pre-check $PROJECT: idle (queue 0, no questions, no pokes) — skipping pass"
+      log "pre-check $PROJECT: idle (queue 0, no pending messages) — skipping pass"
       record precheck-idle
       continue
     fi
@@ -250,6 +281,12 @@ while :; do
   [ -n "${PROJECT_TZ:-}" ]             && ENV_ARGS+=( TICKET_LOOP_TZ="$PROJECT_TZ" )
   [ -n "${TICKET_LOOP_MCP_CONFIG:-}" ] && ENV_ARGS+=( TICKET_LOOP_MCP_CONFIG="$TICKET_LOOP_MCP_CONFIG" )
   [ -n "${DW_PLUGIN_DIR:-}" ]          && ENV_ARGS+=( DW_PLUGIN_DIR="$DW_PLUGIN_DIR" )
+  # Shared default bot: run-pass sources the env file over this, so a project's
+  # own TELEGRAM_BOT_TOKEN (present in the file) always wins over the injection.
+  if [ -n "${DEFAULT_TELEGRAM_BOT_TOKEN:-}" ] \
+     && ! grep -qE '^[[:space:]]*TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null; then
+    ENV_ARGS+=( TELEGRAM_BOT_TOKEN="$DEFAULT_TELEGRAM_BOT_TOKEN" TELEGRAM_SHARED_BOT=1 )
+  fi
 
   run_with_timeout "$TIMEOUT_S" env -i "${ENV_ARGS[@]}" "$RUN_PASS"
   RC=$?
