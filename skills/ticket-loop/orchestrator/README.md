@@ -46,6 +46,31 @@ project is parked for 12h after 3 consecutive crashes. A forced full pass runs
 every 8h per project regardless of pre-check, so pre-check drift can never
 silently starve a board.
 
+## Updating a live deployment (`deploy.sh`)
+
+Once the box is up (runbook below), pushing code is not enough — nothing on the
+box watches GitHub. `orchestrator/deploy.sh` runs the manual chain over ssh in
+one command; pick the verb by **what changed**:
+
+    # code baked into the image (telegram.py, orchestrator.sh, orch.py, run-pass.sh,
+    # cron-run.sh, queue-count.py, SKILL.md, Dockerfile): push → pull → rebuild → recreate
+    skills/ticket-loop/orchestrator/deploy.sh deploy
+    skills/ticket-loop/orchestrator/deploy.sh deploy --no-push   # redeploy the box's HEAD, don't push
+
+    # config on the VOLUME (roster.yml, orch.env, a project's *.env) — rewrite the
+    # volume file first (§4/§10), then reload without a rebuild:
+    skills/ticket-loop/orchestrator/deploy.sh restart
+
+    skills/ticket-loop/orchestrator/deploy.sh status   # container + running-code check + tail
+    skills/ticket-loop/orchestrator/deploy.sh logs     # follow the decision log
+
+Config via env (defaults match nt): `HOST` (default `nt`), `CLAUDE_PIN`
+(default `2.1.207`, also the image tag), `IMAGE`, `VOLUME`, `CONTAINER`,
+`REMOTE_DIR`, `BRANCH`. Docs-only changes (README, specs) need no verb — `deploy`
+pulls them incidentally; a bare `git pull` on the box is enough on its own. The
+script is the executable source of truth for the §10 `docker run` flags and
+never touches secrets/roster/env files (those live in `.local/` + the volume).
+
 ## Deployment runbook (docker — field-tested on nt, 2026-07-12)
 
 Everything below can be staged while any existing single-project scheduler
