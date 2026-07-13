@@ -6,6 +6,17 @@
 tiers in one install, and the autonomous loop grew a round-robin orchestrator for
 running many repos on one box.
 
+### Repo: the framework is the product
+- The legacy copy-paste prompt collections moved from the repo root into
+  **`extras/`** (with `workflows/` renamed `extras/handover/`), indexed by their
+  own `extras/README.md`. The root README is now framework-only: pitch → tiers →
+  quickstart → skills → architecture, plus a 5-line Extras pointer.
+- Added the **MIT `LICENSE`** file (README already claimed MIT) and declared it in
+  `plugin.json`.
+- Install docs everywhere now show the full two-step flow:
+  `claude plugin marketplace add singlas/dev-workflow` →
+  `claude plugin install dev-workflow`.
+
 ### Tiered install (v1 / v2 / v3)
 - **v1 — Local developer (default).** Everything works out of the box after
   `claude plugin install`: the session skills + a per-repo `dev-workflow.yml`.
