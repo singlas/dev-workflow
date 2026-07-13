@@ -34,7 +34,7 @@ if command -v dw-config >/dev/null 2>&1; then DW="dw-config"                    
 elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
 else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
 [ -f dev-workflow.yml ] \
-  && $DW dev-workflow.yml --batch tracker.team tracker.roles.queue.label tracker.roles.queue.states \
+  && $DW dev-workflow.yml --batch tracker.team tracker.project= tracker.roles.queue.label tracker.roles.queue.states \
        tracker.roles.blocked.label tracker.roles.exclude.labels tracker.roles.done.state \
        repo.base_branch repo.prod_branch quality.test quality.lint build.model build.cap_per_pass \
        guardrails.diff_budget.max_lines guardrails.diff_budget.max_files \
@@ -42,6 +42,11 @@ else DW="uv run dev-workflow/dw-config.py"; fi                                  
 ```
 
 - **Tracker** — `tracker.team` (the team/workspace), `tracker.roles`:
+  - **project** (optional) = `tracker.project`. When set, this repo shares a
+    Linear team with other repos and owns only one Project's slice — EVERY
+    `list_actionable` read and every `create_ticket` MUST additionally scope
+    to `tracker.project`, or the pass will pick up / create sibling-repo
+    tickets the project-scoped pre-check (`queue_count`) never counted.
   - **queue** = `roles.queue.label` (e.g. `agent`) + `roles.queue.states`
     (e.g. `Todo`, `In Progress`) — where the loop picks up approved work.
   - **blocked** = `roles.blocked.label` (e.g. `agent-blocked`) — set when a ticket
@@ -249,7 +254,8 @@ Telegram emoji *reactions* never reach the bot, so a thumbs-up reaction is
 invisible; if someone seems to have approved but nothing arrived, that's why.
 
 - **Ticket-creation request** (`ticket: null`, first line starts case-insensitive
-  with `bug:`, `feature:`, or `ticket:`): `create_ticket` in your team —
+  with `bug:`, `feature:`, or `ticket:`): `create_ticket` in your team (and in
+  `tracker.project` when set, so it lands in this repo's slice) —
   title = first line minus the prefix; description = remaining lines +
   `Reported via Telegram by <from>.`; label `Bug` for `bug:`, `Feature` for
   `feature:`, none for `ticket:`. **Apply the queue label immediately** and
@@ -269,7 +275,8 @@ invisible; if someone seems to have approved but nothing arrived, that's why.
   marked <label> — remove the label in the tracker first if you really want the
   agent on it.`
 - **Flag request** — first line starts case-insensitive with `flag:` (`ticket: null`):
-  `create_ticket` (title = first line minus `flag:`; description = remaining lines +
+  `create_ticket` (in `tracker.project` when set; title = first line minus `flag:`;
+  description = remaining lines +
   `Flagged via Telegram by <from>.`), then `label` it with the **flagged** role
   (`roles.flagged.label`). Do **not** apply the **queue** label — a flagged item is for
   the weekly cleanup checklist (human review), not an agent build. Ack `🚩 ABC-<n>
@@ -394,7 +401,10 @@ when there are review comments newer than the branch's last commit, a
 
 `list_actionable` — your team's issues carrying the **queue** label, in one of the
 **queue** states, that carry none of the **exclude** labels (also drop this run's
-skip list). Order by tracker priority, then oldest. If none → step 6.
+skip list) — **and, when `tracker.project` is set, only that Linear Project's
+issues** (so this repo never picks up a sibling repo's ticket on a shared team;
+this is the same filter `queue_count` counts). Order by tracker priority, then
+oldest. If none → step 6.
 
 **Dependency gate — sequence before you build.** For each candidate the actionable
 query returns, read its upstream blockers with `get_blockers` (per

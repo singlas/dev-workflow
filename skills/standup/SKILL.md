@@ -36,7 +36,7 @@ if command -v dw-config >/dev/null 2>&1; then DW="dw-config"                    
 elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
 else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
 [ -f dev-workflow.yml ] \
-  && $DW dev-workflow.yml --batch board.snapshot board.views tracker.team tracker.ticket_prefix \
+  && $DW dev-workflow.yml --batch board.snapshot board.views tracker.team tracker.project= tracker.ticket_prefix \
        tracker.roles.exclude.labels tracker.roles.queue.states \
   || echo "no dev-workflow.yml — using the skill's missing-config fallbacks"
 ```
@@ -69,9 +69,11 @@ backlog views the repo generates.
 
 **If `board.snapshot`/`board.views` isn't configured** (or the snapshot fails):
 say so and fall back to the tracker adapter directly — `list_actionable` over
-`tracker.team`, dropping `tracker.roles.exclude.labels`. If `tracker.team` /
-`tracker.ticket_prefix` are also missing, ask the human for the team name and
-key prefix once, then degrade to adapter-only for the rest of the brief.
+`tracker.team` (scoped to `tracker.project` when set, so a shared-team repo's
+brief doesn't surface sibling repos' tickets), dropping
+`tracker.roles.exclude.labels`. If `tracker.team` / `tracker.ticket_prefix` are
+also missing, ask the human for the team name and key prefix once, then degrade
+to adapter-only for the rest of the brief.
 
 ## 2. Orient — where did I leave off?
 
