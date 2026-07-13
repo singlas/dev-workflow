@@ -106,9 +106,13 @@ CONTAINER="$1"
 sleep 6
 echo "== container =="
 docker ps --filter "name=$CONTAINER" --format "{{.Status}}  image={{.Image}}" || true
-echo "== running code (expect >=1 / >=1) =="
-printf 'peek-only pre-check: '; docker exec "$CONTAINER" grep -c "no pending messages" /opt/dev-workflow/bin/orchestrator.sh 2>/dev/null || echo 0
-printf 'shared-bot mode:     '; docker exec "$CONTAINER" grep -c "TELEGRAM_SHARED_BOT" /opt/dev-workflow/bin/telegram.py 2>/dev/null || echo 0
+echo "== image has latest features baked in? (code-presence checks) =="
+_chk() {  # $1 label, $2 needle, $3 file — present/MISSING, not a count
+  if docker exec "$CONTAINER" grep -q "$2" "$3" 2>/dev/null; then echo "  $1: present"
+  else echo "  $1: MISSING"; fi
+}
+_chk "peek-only pre-check     " "no pending messages" /opt/dev-workflow/bin/orchestrator.sh
+_chk "shared-bot feature code " "TELEGRAM_SHARED_BOT" /opt/dev-workflow/bin/telegram.py
 echo "== recent decisions =="
 docker logs --since 5m "$CONTAINER" 2>&1 | tail -6 || true
 REMOTE
