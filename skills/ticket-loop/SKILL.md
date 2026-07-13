@@ -150,6 +150,24 @@ physically cannot edit the framework driving it.**
 
 ## Preconditions (first run of a session)
 
+**v2 opt-in gate — before anything else.** The local autonomous-agent tier is
+**off unless the repo opts in.** Resolve `agent.enabled` from `dev-workflow.yml`
+(via `dw-config` — see *Per-repo configuration* above), defaulting to `false`:
+
+- **You were launched by the headless runner** (the env var `TICKET_LOOP_LOCK_HELD`
+  is set — i.e. `cron-run.sh` invoked you, whether from local launchd/cron, the
+  Docker image, or the orchestrator) → **skip this gate.** The local scheduled
+  install is gated once, at install time (`install-cron.sh`); the Docker /
+  orchestrator tier is a separate repo-level track and is intentionally not gated
+  on `agent.enabled` (production deployments predate this key). Never block a
+  runner-driven pass here.
+- **Interactive invocation** (no `TICKET_LOOP_LOCK_HELD`) and `agent.enabled` is not
+  exactly `true` → **STOP.** Tell the user this repo hasn't opted into the local
+  agent tier (v2), and that enabling it means adding `agent:`/`enabled: true` to
+  `dev-workflow.yml` (the `/setup` skill can walk them through it). Do nothing else —
+  no lock, no Telegram, no tracker calls.
+- Interactive **and** `agent.enabled: true` → proceed to the singleton lock below.
+
 **Singleton lock — before anything.** Run
 `loop-lock.sh acquire $PPID interactive` (the bundled lock, next to this skill or
 baked at `/opt/dev-workflow/bin/loop-lock.sh`) and act on its exit code only:

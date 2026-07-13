@@ -46,6 +46,37 @@ LABEL="${TICKET_LOOP_LABEL:-com.example.ticket-loop}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 
+# v2 opt-in gate: the LOCAL autonomous-agent tier is OFF unless the TARGET repo's
+# dev-workflow.yml sets `agent.enabled: true`. This gates only the local scheduled
+# install — the Docker/orchestrator runner does NOT use this script and is
+# intentionally not gated on this key (production deployments predate it). Defensive:
+# a missing file, missing key, or any non-true value is treated as DISABLED.
+require_agent_enabled() {
+  local wt="$1" cfg="$1/dev-workflow.yml" val=""
+  if [ -f "$cfg" ]; then
+    if command -v uv >/dev/null 2>&1; then
+      val="$(cd "$wt" && uv run --quiet --no-project "$FW_ROOT/dev-workflow/dw-config.py" dev-workflow.yml agent.enabled false 2>/dev/null || echo false)"
+    elif command -v python3 >/dev/null 2>&1; then
+      val="$(cd "$wt" && python3 "$FW_ROOT/dev-workflow/dw-config.py" dev-workflow.yml agent.enabled false 2>/dev/null || echo false)"
+    else
+      val="false"
+    fi
+  fi
+  val="$(printf '%s' "$val" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  if [ "$val" != "true" ]; then
+    echo "ERROR: the local autonomous agent (v2) is not enabled for this repo." >&2
+    echo "       $cfg does not set 'agent.enabled: true' — this tier is opt-in." >&2
+    echo "       To enable it, add to your dev-workflow.yml:" >&2
+    echo "" >&2
+    echo "         agent:" >&2
+    echo "           enabled: true" >&2
+    echo "" >&2
+    echo "       then re-run this installer. (The /setup skill can walk you through it.)" >&2
+    echo "       Note: the remote Docker runner / orchestrator tier is separate and NOT gated here." >&2
+    exit 3
+  fi
+}
+
 LOOP_WORKTREE="${TICKET_LOOP_WORKTREE:-}"   # legacy in-tree layout
 WORK_TREE="${DW_WORK_TREE:-}"               # external-runner target repo
 ENV_FILE="${DW_ENV_FILE:-}"
@@ -209,6 +240,13 @@ case "$ACTION" in
     git -C "$TARGET" reset --hard origin/dev
     echo "Refreshed $TARGET → origin/dev"; exit 0 ;;
 esac
+
+# Past this point ACTION is install (uninstall/refresh/status/questions/run-now all
+# exited above). Enforce the v2 opt-in against the target work tree before writing a
+# plist. If the work tree is unset, fall through — the mode-specific `:?` guards below
+# give a clearer "set the work tree" error than the opt-in message would.
+GATE_WT="${WORK_TREE:-$LOOP_WORKTREE}"
+[ -n "$GATE_WT" ] && require_agent_enabled "$GATE_WT"
 
 intervals="$(build_intervals)"
 
