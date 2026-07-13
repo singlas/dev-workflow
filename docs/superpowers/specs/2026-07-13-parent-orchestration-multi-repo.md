@@ -100,8 +100,13 @@ Layout on the volume:
 Every inbound Telegram message resolves to a target repo BEFORE any tracker
 mutation:
 
-- **Reply to a bot question** → routes by `message_id` (the parent's questions map
-  records ticket → project → repo when it asked). Already how answers match.
+- **Reply to a bot question** → the questions map gives the `ticket`; `get_ticket`
+  → its Linear project → repo. NOTE: today the bridge's questions map is only
+  `{ticket, text, asked_at}` — it does NOT store project/repo, so the reply
+  resolves the repo via a `get_ticket` read (Phase 3 would let the map carry it).
+  Recording the answer (`comment` + drop `blocked`) works by ticket id and must
+  NOT depend on repo resolution — never burn a reply because its project is
+  unmapped/empty.
 - **`take PAY-123` / green-light an existing ticket** → read the ticket, route by
   its Linear project field.
 - **`bug:` / `feature:` / `ticket:` / `flag:` (fresh, no ticket yet)** → the repo
@@ -123,7 +128,9 @@ After the parent picks the next actionable ticket and resolves its repo, it:
    - **Work tree:** `/home/agent/paytunes/pt-api` (the resolved child clone).
    - **Task:** implement `PAY-123` (title/description/acceptance inline).
    - **Contract:** read THIS repo's `dev-workflow.yml` for `quality.test` /
-     `quality.lint` / `repo.base_branch`; branch `feature-N`; open ONE PR into the
+     `quality.lint` / `repo.base_branch`; branch `agent/<lowercased-key>` (the
+     frozen loop's convention — NOT `feature-N`, which is the human worktree
+     model); open ONE PR into the
      child's base branch; obey the child's guardrails/diff budget.
    - **Return:** the PR URL + a one-line status. NOTHING to Telegram/board — the
      parent owns all human comms.
