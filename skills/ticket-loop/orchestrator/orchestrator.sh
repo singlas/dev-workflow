@@ -29,6 +29,9 @@
 #                            TELEGRAM_BOT_TOKEN of its own — those run telegram.py
 #                            in shared (no-ack) mode; a new tenant then only needs
 #                            its own group + AGENT_TELEGRAM_CHAT_ID
+#   DEFAULT_CLAUDE_CODE_OAUTH_TOKEN  common Claude token for every pass; a project
+#                            whose env file sets its own CLAUDE_CODE_OAUTH_TOKEN
+#                            (a separate account / limit pool) overrides it
 #   TICKET_LOOP_MCP_CONFIG / DW_PLUGIN_DIR / DW_PYTHON  forwarded to each pass when set
 #
 # Control surface: `touch <ORCH_STATE_DIR>/run-now` (optionally echo a project
@@ -65,11 +68,13 @@ RUN_NOW_FILE="$ORCH_STATE_DIR/run-now"
 ORCH_ENV_FILE="${ORCH_ENV_FILE:-$(dirname "$ROSTER")/orch.env}"
 if [ -f "$ORCH_ENV_FILE" ]; then
   _bot="${ORCH_TELEGRAM_BOT_TOKEN:-}" _chat="${ORCH_TELEGRAM_CHAT_ID:-}" _dflt="${DEFAULT_TELEGRAM_BOT_TOKEN:-}"
+  _ctok="${DEFAULT_CLAUDE_CODE_OAUTH_TOKEN:-}"
   set -a; . "$ORCH_ENV_FILE"; set +a
   [ -n "$_bot" ]  && ORCH_TELEGRAM_BOT_TOKEN="$_bot"
   [ -n "$_chat" ] && ORCH_TELEGRAM_CHAT_ID="$_chat"
   [ -n "$_dflt" ] && DEFAULT_TELEGRAM_BOT_TOKEN="$_dflt"
-  unset _bot _chat _dflt
+  [ -n "$_ctok" ] && DEFAULT_CLAUDE_CODE_OAUTH_TOKEN="$_ctok"
+  unset _bot _chat _dflt _ctok
 fi
 
 # Python runner for orch.py (PEP 723 pyyaml): same dance as cron-run.sh.
@@ -287,6 +292,12 @@ while :; do
      && ! grep -qE '^[[:space:]]*TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null; then
     ENV_ARGS+=( TELEGRAM_BOT_TOKEN="$DEFAULT_TELEGRAM_BOT_TOKEN" TELEGRAM_SHARED_BOT=1 )
   fi
+  # Common Claude token: injected as a baseline; run-pass sources the project's
+  # env file AFTER this, so a project that carries its own CLAUDE_CODE_OAUTH_TOKEN
+  # (its own account / limit pool) transparently overrides it. Unlike the bot,
+  # no mode flag rides along, so always-inject + let-the-file-win is correct.
+  [ -n "${DEFAULT_CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
+    && ENV_ARGS+=( CLAUDE_CODE_OAUTH_TOKEN="$DEFAULT_CLAUDE_CODE_OAUTH_TOKEN" )
 
   run_with_timeout "$TIMEOUT_S" env -i "${ENV_ARGS[@]}" "$RUN_PASS"
   RC=$?

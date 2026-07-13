@@ -25,18 +25,21 @@ projects:
 EOF
 
 # Orchestrator env file (auto-discovered next to the roster): the project's env
-# file is empty, so the pass must receive the shared default bot in no-ack mode.
+# file is empty, so the pass must receive the shared default bot in no-ack mode
+# AND the common Claude token.
 cat > "$TMP/root/orch.env" <<'EOF'
 DEFAULT_TELEGRAM_BOT_TOKEN=fake-default-token
+DEFAULT_CLAUDE_CODE_OAUTH_TOKEN=fake-claude-token
 EOF
 
 # Stub runner: pretends one pass opened a PR, via the outcome.json contract.
-# Also asserts the default-bot injection (a missing env there → exit 1 → the
-# outcome assertion below fails loudly instead of passing vacuously).
+# Also asserts the default-bot + common-token injection (a missing env there →
+# exit 1 → the outcome assertion below fails loudly instead of passing vacuously).
 cat > "$TMP/stub-pass.sh" <<'EOF'
 #!/bin/bash
 [ "${TELEGRAM_BOT_TOKEN:-}" = "fake-default-token" ] || { echo "FAIL: default bot not injected" >&2; exit 1; }
 [ "${TELEGRAM_SHARED_BOT:-}" = "1" ] || { echo "FAIL: shared-bot flag not set" >&2; exit 1; }
+[ "${CLAUDE_CODE_OAUTH_TOKEN:-}" = "fake-claude-token" ] || { echo "FAIL: common Claude token not injected" >&2; exit 1; }
 mkdir -p "$TICKET_LOOP_STATE_DIR"
 printf '{"picked":1,"pr_opened":1,"asked":0,"blocked":0,"progressed":true,"error":null}\n' \
   > "$TICKET_LOOP_STATE_DIR/outcome.json"

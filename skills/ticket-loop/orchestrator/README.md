@@ -331,6 +331,11 @@ roster on the volume — no `-e` flags in `docker run`, nothing secret in
     ORCH_TELEGRAM_CHAT_ID=…
     DEFAULT_TELEGRAM_BOT_TOKEN=…   # shared fallback bot for tenants without
                                    # their own (see onboarding §3)
+    DEFAULT_CLAUDE_CODE_OAUTH_TOKEN=…  # common Claude token for every pass; a
+                                   # project's own CLAUDE_CODE_OAUTH_TOKEN in its
+                                   # env file (a separate account / limit pool)
+                                   # overrides it. Use a box-dedicated account so
+                                   # passes don't share your interactive limit.
 
     docker run --rm -i --user root -v dw-agent:/home/agent dw-agent:<pin> bash -c \
       'cat > /home/agent/orch.env && chown 10001:10001 /home/agent/orch.env && chmod 600 /home/agent/orch.env' \
