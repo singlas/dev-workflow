@@ -169,8 +169,10 @@ a product are explicitly out of scope (§12).
   counts the whole product's actionable tickets, exactly the default behavior. If
   > 0, the parent runs and internally picks + routes one ticket.
 - Round-robin is across ROSTER ENTRIES as today (niptao, rasa-parent,
-  paytunes-parent). "One repo per pass, next pass a different repo" emerges from
-  the parent picking the next-priority ticket each pass, resolving its repo.
+  paytunes-parent). WITHIN a parent entry, the parent itself round-robins over its
+  child `repos:` (see Q2, DECIDED): each pass drains+routes the shared group
+  globally, then works ONE child repo (its PRs + its next ticket). "One repo per
+  pass, next pass a different repo" is the child round-robin, not ticket priority.
 - `cap_per_pass` (≤2) applies within a pass; keep a pass to ONE child repo (pick
   the top ticket, drain up to the cap in that same repo) so no pass switches work
   trees mid-flight.
@@ -221,9 +223,18 @@ a product are explicitly out of scope (§12).
   allowlist entry, given it is never `git reset --hard`? Proposal: yes for the
   allowlist, but the parent skill must NOT reset it — only child clones reset.
   Confirm the work-tree guard treats a parent entry correctly.
-- **Q2.** PR-babysitting across children within one pass: iterate all open PRs
-  across all `repos[]`, or only the pass's current repo? Proposal: all open PRs
-  (the parent is the single owner), bounded by pass timeout.
+- **Q2. DECIDED (repo-scoped).** PR-babysitting is scoped to the CURRENT PASS's
+  repo only, not all children — releases happen at the repo level, so a repo's PRs
+  are that repo's concern. This makes the pass **repo-round-robin**: the parent
+  rotates its `repos:` the way the orchestrator rotates roster entries. Each pass =
+  (1) a GLOBAL step — drain the shared Telegram group and route EVERY message to
+  its target repo (record answers on tickets, create fresh tickets in the resolved
+  repo) so no repo's messages pile up; then (2) a REPO step for the pass's chosen
+  child only — babysit ITS open PRs + build ITS next actionable ticket (subagent in
+  that clone). A per-child pre-check (queue_count on the child's project + an
+  open-PR check) skips idle children so they don't burn passes, while every
+  non-idle child gets its turn (that's how its PRs get babysat with no new ticket).
+  This supersedes §10's ticket-priority framing.
 - **Q3.** Where does the parent record "which project a question belongs to" for
   reply-routing — the existing questions map already stores `ticket`; add the
   resolved `project`/repo so a reply dispatches to the right clone without a Linear
