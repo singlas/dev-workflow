@@ -281,26 +281,45 @@ The loop is tracker-driven; a project can't be round-robined until it has:
 1. `dev-workflow.yml` at its repo root (validate: `uv run dev-workflow/validate.py <file>`).
 2. A Linear team with the queue/blocked/exclude/done roles mapped in
    `tracker.roles`, and at least one eligible ticket.
-3. A Telegram **group of its own** (chat ids are always per-project). The bot
-   is optional: with `DEFAULT_TELEGRAM_BOT_TOKEN` in `orch.env`, just add the
-   default bot to the new group and set `AGENT_TELEGRAM_CHAT_ID` — the
-   orchestrator injects the shared bot in **no-ack mode** (`telegram.py` then
-   never sends a getUpdates offset; a shared stream must never be acked by one
-   project, that destroys the siblings' pending messages). A project may still
-   bring its own `TELEGRAM_BOT_TOKEN` (dedicated mode, offset-acked) — right
-   for high-traffic groups, since shared mode scans only Telegram's first 100
-   unacked updates. Never point two ROSTER projects at one *group*, and never
+3. A Telegram **group of its own** (chat ids are always per-project) and a bot
+   that can read it. Never point two ROSTER projects at one *group*, and never
    share a bot that anything outside this orchestrator also polls.
-   Get the chat id: add the bot to the group, send one message, run
-   `python3 skills/ticket-loop/telegram.py discover` with the bot's token in env.
-   - **Group privacy mode (bites silently):** BotFather bots default to privacy
-     ON in groups — they receive ONLY `/commands` and *replies to their own
-     messages*, so a plain `"RAS-5 go"` answer never reaches the bot at all.
-     Fix once per bot: BotFather → `/setprivacy` → **Disable**, then remove +
-     re-add the bot to each group (or skip the re-add dance by making the bot a
-     group **admin** — admins always see everything). Symptom when you forget:
-     answers show ✓✓ in Telegram, passes keep classifying `waiting`, and the
-     bot's `getWebhookInfo` shows `pending_update_count: 0`.
+
+   **Which bot?**
+   - **Shared default (the easy path):** with `DEFAULT_TELEGRAM_BOT_TOKEN` set
+     in `orch.env`, a project needs no bot of its own — leave `TELEGRAM_BOT_TOKEN`
+     out of its env file, add the default bot to the new group, set
+     `AGENT_TELEGRAM_CHAT_ID`, done. The orchestrator injects the shared bot in
+     **no-ack mode** (`telegram.py` never sends a getUpdates offset — a shared
+     stream acked by one project deletes the siblings' pending messages; it
+     filters by chat id + a local floor instead). Trade-off: no-ack mode scans
+     only Telegram's first ~100 unacked updates and Telegram retains updates
+     ~24h, so this is right for low-traffic groups, not busy ones.
+   - **Dedicated (`TELEGRAM_BOT_TOKEN` in the project's env file):** the project
+     owns the bot's whole getUpdates queue, so it acks normally — no scan-window
+     limit. Use this for a high-traffic group, or any bot already used elsewhere.
+
+   **Creating a bot (do the privacy step BEFORE adding it to any group):**
+   1. BotFather → `/newbot` → name it → copy the token.
+   2. **Turn privacy OFF — this is not optional.** BotFather → `/setprivacy` →
+      pick the bot → **Disable**. With privacy ON (the default) a bot in a group
+      receives ONLY `/commands` and *replies to its own messages*, so a plain
+      `"RAS-5 go"` answer never reaches it and every pass classifies `waiting`
+      forever. (Alternative to disabling privacy: make the bot a group **admin** —
+      admins always see all messages. Do one or the other.)
+   3. NOW add the bot to the group. (If you added it before step 2, Telegram
+      caches the privacy state — remove it and re-add, or promote it to admin.)
+   4. Get the chat id: send one message in the group, then run
+      `python3 skills/ticket-loop/telegram.py discover` with the bot's token in
+      env. Group ids are negative; supergroups start with `-100`.
+
+   **Verify a bot can actually read its group** (catches the privacy trap before
+   it costs you a night): send a NON-reply, non-command message in the group,
+   then `curl -s "https://api.telegram.org/bot<token>/getUpdates?timeout=0"` — you
+   should see that message. Empty result + `pending_update_count: 0` from
+   `getWebhookInfo` = privacy is still on (or the bot isn't in the group). The
+   silent-failure signature in production: answers show ✓✓ in Telegram, the
+   project's `state.json` `offset` stays `0`, passes keep classifying `waiting`.
 4. **A fine-grained per-repo `GH_TOKEN`.** Gotchas learned the hard way:
    - The token page's *Resource owner* dropdown only lists orgs that have
      **enabled** fine-grained PATs — flip it first at
