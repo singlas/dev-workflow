@@ -1,5 +1,19 @@
 # Release notes
 
+## v0.5.2
+
+**Completes `tracker.project` in the runtime contracts (Codex-caught).** v0.5.1
+scoped the pre-check (`queue-count.py`) by Linear Project but left the SKILL.md
+contracts that drive the actual passes team-wide — so on a shared team a pass
+could pick up a sibling repo's ticket the pre-check never counted, and
+`create_ticket` could drop new tickets outside the project slice (`queue_count`
+must match `list_actionable`; it didn't).
+
+- `ticket-loop`: loads `tracker.project`; `list_actionable` and `create_ticket`
+  (report + flag paths) now scope to the Project when set.
+- `standup`: the board-snapshot fallback's `list_actionable` scopes to the
+  Project too, so a shared-team brief doesn't surface other repos' tickets.
+
 ## v0.5.1
 
 **Multi-repo tracking: one Linear team, one Project per repo.** A new optional
