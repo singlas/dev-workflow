@@ -7,5 +7,11 @@
   },
   "homepage": "https://github.com/singlas/dev-workflow",
   "repository": "https://github.com/singlas/dev-workflow",
-  "keywords": ["workflow", "tickets", "linear", "worktrees", "agent"]
+  "keywords": [
+    "workflow",
+    "tickets",
+    "linear",
+    "worktrees",
+    "agent"
+  ]
 }

@@ -1,0 +1,3 @@
+[
+  { "file": ".claude-plugin/plugin.json", "jq_path": ".version" }
+]

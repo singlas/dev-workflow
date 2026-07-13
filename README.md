@@ -260,6 +260,12 @@ This repo is a living collection. Contributions are welcome.
 To contribute: fork, branch (`git checkout -b my-change`), edit, and open a PR
 with a brief description of what changed and why.
 
+**Releasing** — the plugin version lives in one declared place
+(`.version-bump.json` → `.claude-plugin/plugin.json`). Bump it with
+`scripts/bump-version.sh <new-version>`; verify no drift with
+`scripts/bump-version.sh --check` (or `--audit` to also catch stray version
+strings that should be declared).
+
 ## References
 
 - [awesome-cursorrules](https://github.com/PatrickJS/awesome-cursorrules) — 130+ community .cursorrules examples

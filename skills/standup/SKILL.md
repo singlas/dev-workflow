@@ -61,7 +61,7 @@ Regenerate the snapshot so the views are current — never reason off a stale
 `board.views`:
 
 Run the `board.snapshot` command loaded by the preamble (the value of
-`board.snapshot`), then read the generated views.
+`board.snapshot`).
 
 Then read the generated views under `board.views` — at minimum the
 In-Progress + Todo view (the primary input), plus whatever gate/milestone and

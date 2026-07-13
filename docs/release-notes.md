@@ -38,6 +38,23 @@ running many repos on one box.
   PATH shim and framework-checkout forms — a plugin-install user has neither of the
   latter two. Same treatment for release's `dw-telegram` fallback.
 
+### Deterministic skill preambles + `dw-config --batch`
+- New **batch mode**: `dw-config <yml> --batch key[=default] …` prints one
+  shell-escaped `key=value` line per key in a single call (single-key mode unchanged;
+  covered by `dev-workflow/test_dw_config.py`).
+- Each interactive skill (standup, cleanup, release, blog-from-session, ticket-loop,
+  setup) now opens its config section with ONE fenced preamble the model runs first —
+  resolve the reader (PATH → `${CLAUDE_PLUGIN_ROOT}` → framework checkout), then a
+  single `--batch` call loading every key that skill uses. No more per-key shell-outs
+  mid-procedure; the preamble degrades to a clear "no config" line when
+  `dev-workflow.yml` is absent, so the existing missing-config fallbacks still fire.
+
+### Version-drift tooling
+- `.version-bump.json` declares every file+field carrying the plugin version (today:
+  `.claude-plugin/plugin.json` `.version`). `scripts/bump-version.sh` bumps them all
+  (`<new-version>`), `--check`s for drift, or `--audit`s the repo for stray version
+  strings that should be declared. Contributor docs point releases at it.
+
 ### Multi-project orchestrator (loop)
 - **Round-robin scheduler** (`orchestrator/`) over the same runner image: roster load,
   marker-file work-tree guard, atomic orch-state, memory gate, window intersection,
