@@ -50,8 +50,10 @@ def load_config(path):
 
 
 def read_roles(data, mod):
-    """tracker.team + queue role + exclude labels, straight from tracker.roles —
-    never hardcoded names (the adapter-seam hard rule)."""
+    """tracker.team + optional tracker.project + queue role + exclude labels,
+    straight from tracker.roles — never hardcoded names (the adapter-seam hard
+    rule). `project` (a Linear Project name) scopes one repo inside a shared team
+    when several repos share one board; None when absent."""
     team = mod.get(data, "tracker.team")
     queue = mod.get(data, "tracker.roles.queue")
     if team is mod._MISSING or queue is mod._MISSING or not isinstance(queue, dict):
@@ -63,15 +65,22 @@ def read_roles(data, mod):
     excludes = []
     if isinstance(exclude, dict) and isinstance(exclude.get("labels"), list):
         excludes = [str(x) for x in exclude["labels"]]
-    return str(team), str(label), [str(s) for s in states], excludes
+    project = mod.get(data, "tracker.project")
+    project = str(project) if project not in (mod._MISSING, None, "") else None
+    return str(team), str(label), [str(s) for s in states], excludes, project
 
 
-def build_payload(team, label, states):
-    return {"query": GQL, "variables": {"filter": {
+def build_payload(team, label, states, project=None):
+    """Same eligibility filter as list_actionable. When `project` is set, scope to
+    that Linear Project too — the per-repo slice of a team shared across repos."""
+    flt = {
         "team": {"name": {"eq": team}},
         "labels": {"name": {"eq": label}},
         "state": {"name": {"in": states}},
-    }}}
+    }
+    if project:
+        flt["project"] = {"name": {"eq": project}}
+    return {"query": GQL, "variables": {"filter": flt}}
 
 
 def count_eligible(body, exclude_labels):
@@ -96,10 +105,10 @@ def main():
     if not key:
         sys.exit("error: LINEAR_API_KEY is not set")
     data, mod = load_config(args.config)
-    team, label, states, excludes = read_roles(data, mod)
+    team, label, states, excludes, project = read_roles(data, mod)
     req = urllib.request.Request(
         LINEAR_URL,
-        data=json.dumps(build_payload(team, label, states)).encode(),
+        data=json.dumps(build_payload(team, label, states, project)).encode(),
         # Personal API keys go bare in Authorization (Bearer is for OAuth tokens).
         headers={"Content-Type": "application/json", "Authorization": key})
     try:

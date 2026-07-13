@@ -66,6 +66,17 @@ class ValidateTests(unittest.TestCase):
         errors = _errors_for(cfg)
         self.assertTrue(any("tracker.team" in e for e in errors), errors)
 
+    def test_tracker_project_optional_valid_passes(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["tracker"]["project"] = "acme-api"
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_tracker_project_empty_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["tracker"]["project"] = ""
+        errors = _errors_for(cfg)
+        self.assertTrue(any("tracker.project" in e for e in errors), errors)
+
     def test_off_limits_non_list_fails(self):
         cfg = copy.deepcopy(MINIMAL)
         cfg["guardrails"] = {"off_limits": "*.pem"}

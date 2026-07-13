@@ -34,17 +34,26 @@ Linear is driven through its MCP tools (`mcp__linear__*`). Pass the **team
 name** from `tracker.team` (Linear's `list_*` tools want the human team name,
 not the key prefix). Names below in `roles.*` are read from `dev-workflow.yml`.
 
+**`tracker.project` (optional) — one repo's slice of a shared team.** When
+several repos share one Linear team (e.g. a multi-repo product, or a personal
+team spanning hobby repos), set `tracker.project: <Linear Project name>` in each
+repo's `dev-workflow.yml`. Every read/create verb then additionally scopes to
+that Project, so a repo only ever sees and touches its own issues on the shared
+board. Ticket **identifiers stay team-scoped** (all repos share the team's key
+prefix — the Project field, not the key, distinguishes the repo). Omit
+`tracker.project` and every verb is team-only, exactly as before.
+
 | Verb | Linear MCP call | Notes |
 |---|---|---|
-| `list_actionable` | `mcp__linear__list_issues` | Filter by `team = tracker.team`, `label = roles.queue.label`, `state ∈ roles.queue.states`; then drop any issue carrying a `roles.exclude.labels` entry (filter client-side — combine as needed). |
+| `list_actionable` | `mcp__linear__list_issues` | Filter by `team = tracker.team`, `label = roles.queue.label`, `state ∈ roles.queue.states`, **and `project = tracker.project` when set**; then drop any issue carrying a `roles.exclude.labels` entry (filter client-side — combine as needed). |
 | `get_ticket` | `mcp__linear__get_issue` | By issue id / key. |
-| `create_ticket` | `mcp__linear__save_issue` | Omit the id to create; set `team`, `title`, `description`, `labels`, `state`. |
+| `create_ticket` | `mcp__linear__save_issue` | Omit the id to create; set `team`, `title`, `description`, `labels`, `state`, **and `project = tracker.project` when set** (so a new ticket lands in this repo's slice of the shared board). |
 | `comment` | `mcp__linear__save_comment` | New comment on the issue. |
 | `move` (state-role) | `mcp__linear__save_issue` | Update the existing issue's `state` to the name resolved from the role (e.g. `roles.done.state`). |
 | `label` / `unlabel` (label-role) | `mcp__linear__save_issue` | Update the issue's `labels` set — add/remove the name resolved from the role. |
 | `link_pr` | `mcp__linear__create_attachment` | Attach the PR URL to the issue. |
 | `get_blockers` | `mcp__linear__get_issue` (relations) | If the MCP returns the issue's `blocked-by` relations, use them directly. **Fallback convention** (relations not cheaply readable): parse a `Blocked by: ABC-###` line — comma-separated keys allowed — from the ticket description **at triage**; zero adapter work. Either path, `get_ticket` each blocker key to read its current state. |
-| `queue_count` | `dev-workflow/queue-count.py` (GraphQL over urllib, keyed by `LINEAR_API_KEY`) | Same filter as `list_actionable` (team + queue label + queue states, exclude labels dropped client-side); returns only the count. Not an MCP call — it must run without a Claude session. |
+| `queue_count` | `dev-workflow/queue-count.py` (GraphQL over urllib, keyed by `LINEAR_API_KEY`) | Same filter as `list_actionable` (team + optional `tracker.project` + queue label + queue states, exclude labels dropped client-side); returns only the count. Not an MCP call — it must run without a Claude session. |
 
 **Linear MCP has no delete.** The strongest teardown is moving an issue to a
 `Canceled` state — never assume a hard delete exists. Anything the loop

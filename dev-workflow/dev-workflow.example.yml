@@ -19,6 +19,13 @@ tracker:
   provider: linear                # linear is the only implementation today
   team: Acme                      # the tracker team/workspace name
   ticket_prefix: ABC              # ticket keys look like ABC-123
+  # project: acme-api             # OPTIONAL: a Linear Project that scopes THIS repo
+                                  # inside a team shared across repos (multi-repo
+                                  # product, or one personal team over many hobby
+                                  # repos). Every read/create verb then filters to
+                                  # this Project. Keys stay team-scoped (all repos
+                                  # share `ticket_prefix`); the Project distinguishes
+                                  # the repo. Omit for a one-team-per-repo setup.
   roles:                          # map framework roles -> your board's own label/state names
     queue:   { label: agent, states: [Todo, In Progress] }   # the loop picks up work here
     blocked: { label: agent-blocked }                        # set when a ticket needs a human ANSWER

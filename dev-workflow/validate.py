@@ -92,6 +92,10 @@ def check(data):
                 "tracker.provider %r is not supported (known: %s)"
                 % (provider, ", ".join(sorted(KNOWN_TRACKERS)))
             )
+        # tracker.project (optional) — a Linear Project scoping this repo inside a
+        # team shared across repos. When present it must be a non-empty string.
+        if "project" in tracker and not _nonempty_str(tracker.get("project")):
+            errors.append("tracker.project must be a non-empty string when set")
         # tracker.roles — when present, the role→name bindings must be filled.
         roles = tracker.get("roles")
         if isinstance(roles, dict):

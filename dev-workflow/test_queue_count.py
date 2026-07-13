@@ -38,11 +38,12 @@ def load_cfg(text=CONFIG):
 class TestReadRoles(unittest.TestCase):
     def test_reads_team_queue_and_excludes(self):
         data, mod = load_cfg()
-        team, label, states, excludes = qc.read_roles(data, mod)
+        team, label, states, excludes, project = qc.read_roles(data, mod)
         self.assertEqual(team, "Acme")
         self.assertEqual(label, "agent")
         self.assertEqual(states, ["Todo", "In Progress"])
         self.assertEqual(excludes, ["manual", "gated"])
+        self.assertIsNone(project)          # no tracker.project in CONFIG
 
     def test_missing_queue_role_errors(self):
         data, mod = load_cfg("tracker:\n  team: Acme\n")
@@ -53,8 +54,16 @@ class TestReadRoles(unittest.TestCase):
         data, mod = load_cfg(
             "tracker:\n  team: Acme\n  roles:\n"
             "    queue: { label: agent, states: [Todo] }\n")
-        _, _, _, excludes = qc.read_roles(data, mod)
+        _, _, _, excludes, _ = qc.read_roles(data, mod)
         self.assertEqual(excludes, [])
+
+    def test_reads_optional_project(self):
+        data, mod = load_cfg(
+            "tracker:\n  team: Paytunes\n  project: paytunes-api\n  roles:\n"
+            "    queue: { label: agent, states: [Todo] }\n")
+        team, _, _, _, project = qc.read_roles(data, mod)
+        self.assertEqual(team, "Paytunes")
+        self.assertEqual(project, "paytunes-api")
 
 
 class TestBuildPayload(unittest.TestCase):
@@ -65,6 +74,16 @@ class TestBuildPayload(unittest.TestCase):
         self.assertEqual(f["labels"]["name"]["eq"], "agent")
         self.assertEqual(f["state"]["name"]["in"], ["Todo", "In Progress"])
         self.assertIn("issues(filter: $filter", payload["query"])
+        self.assertNotIn("project", f)      # no project → team-only, as before
+
+    def test_project_scopes_filter(self):
+        f = qc.build_payload("Paytunes", "agent", ["Todo"], project="paytunes-api")["variables"]["filter"]
+        self.assertEqual(f["project"]["name"]["eq"], "paytunes-api")
+        self.assertEqual(f["team"]["name"]["eq"], "Paytunes")  # team still scopes too
+
+    def test_empty_project_omitted(self):
+        f = qc.build_payload("Acme", "agent", ["Todo"], project=None)["variables"]["filter"]
+        self.assertNotIn("project", f)
 
 
 class TestCountEligible(unittest.TestCase):
