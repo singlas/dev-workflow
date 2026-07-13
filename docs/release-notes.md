@@ -1,5 +1,43 @@
 # Release notes
 
+## v0.5.3
+
+**Parent orchestration: one product, many repos, one board, one group.** A new
+`ticket-loop-parent` skill runs a whole multi-repo product as a single roster
+entry — one Linear team, one Telegram bot + group — that round-robins its child
+repos: each pass drains and routes the shared group globally, then works ONE child
+(babysit its PRs + build its next ticket via a subagent in that child's clone).
+Releases stay repo-level; the parent checkout is never reset; child clones and
+their state stay isolated. The single-repo `/ticket-loop` is untouched and
+config-selects between them.
+
+Built spec-first (`docs/superpowers/specs/2026-07-13-parent-orchestration-*`) with
+a Phase 0 GO/NO-GO prototype and six Codex review passes.
+
+### Added
+- **`ticket-loop-parent` skill** — the management plane (routing, questions,
+  digest, scout, PR-babysitting) that dispatches every build as a subagent into
+  the resolved child clone.
+- **Per-entry mode selection** — roster `skill:` and `manager:` (overriding a
+  repo's `agent.skill` / `agent.manager`) → `DW_SKILL` / `DW_MANAGER`. **Manager
+  mode** stops the runner from `git reset --hard`-ing a parent checkout.
+- **`repos:` config** — the parent's project→child-clone routing table, with
+  duplicate-project/path and no-`tracker.project`-on-a-parent validation.
+- **`DEFAULT_CLAUDE_CODE_OAUTH_TOKEN`** in `orch.env` — a common Claude token for
+  every pass, overridden by a project's own `CLAUDE_CODE_OAUTH_TOKEN` (a separate
+  account / session-limit pool).
+- **Telegram bridge routing** — `send --project` / `--context`; `poll` emits
+  `project` + `context`, so a reply routes to the right repo without a tracker
+  read and a "which project?" clarifier completes in one reply.
+
+### Fixed
+- A parent pass that exits 0 without an `outcome.json` (config-read failure) now
+  classifies as **error**, not a fake idle `dry` — a broken deploy escalates.
+- `agent.skill` / roster `skill:` must be a **bare name** (a `:` value would
+  double-prefix to `/dev-workflow:dev-workflow:…`).
+- Manager-mode boolean coercion handled dw-config's capitalized `True`/`False`
+  (a repo `agent.manager: true` was silently ignored, resetting the parent).
+
 ## v0.5.2
 
 **Completes `tracker.project` in the runtime contracts (Codex-caught).** v0.5.1
