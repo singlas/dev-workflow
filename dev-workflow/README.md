@@ -94,17 +94,48 @@ when present). With no `blog:` section, `cleanup` never mentions a post; even wi
 it, the skill only ever writes ONE draft file locally — it never publishes,
 commits, or pushes. See [`../skills/blog-from-session/`](../skills/blog-from-session/).
 
-## Distribution
+## Distribution — three tiers, one framework
 
-Two shapes, one framework:
+The framework ships as one plugin with three adoption tiers. A repo takes only as
+much as it wants; each tier builds on the one before.
 
-- **Docker runner** — for the autonomous loop. The image bakes the runner +
-  plugin at `/opt/dev-workflow` and runs on a timer against a mounted work
-  tree. Setup: [`../skills/ticket-loop/docker/README.md`](../skills/ticket-loop/docker/README.md).
-- **Claude Code plugin** — for the interactive skills (`standup`, `cleanup`,
-  `release`, and `ticket-loop` when driven by hand). Install it with
-  `claude plugin install` (plugin name `dev-workflow`), or point Claude Code
-  at this checkout with `--plugin-dir`.
+### v1 — Local developer (default, every install)
+
+The interactive session skills, working locally. Install the plugin
+(`claude plugin install`, plugin name `dev-workflow`, or `--plugin-dir <checkout>`),
+then:
+
+- Run **`/setup`** to write a validated `dev-workflow.yml` (prereq checks +
+  interview), or copy [`dev-workflow.example.yml`](dev-workflow.example.yml) by hand.
+- Work the day with **`/standup`** → **`/cleanup`** → **`/release`** (plus
+  **`/blog-from-session`**). The branch model is worktree-based — the playbook +
+  ready-to-copy scripts are in [`../dev-process/README.md`](../dev-process/README.md).
+- A **SessionStart hook** auto-orients any session opened in a configured repo
+  (and stays silent everywhere else).
+
+### v2 — Local agent (opt-in, OFF by default)
+
+A local autonomous agent — the `ticket-loop` skill + its launchd/cron installer —
+working the queue on your own machine, one PR per ticket. **Gated by
+`agent.enabled: true`** in `dev-workflow.yml`: absent or false, and both
+`/ticket-loop` (interactively) and [`../skills/ticket-loop/install-cron.sh`](../skills/ticket-loop/install-cron.sh)
+refuse with an opt-in message. Supply the loop's env
+([`../skills/ticket-loop/env.example`](../skills/ticket-loop/env.example)) and
+install the schedule. `agent.enabled` is a feature switch, not a guardrail — it
+never loosens a ceiling.
+
+### v3 — Remote runner (repo-level, separate — not a plugin install)
+
+The Docker image + multi-project orchestrator, running unattended on a server
+against mounted work trees. The image bakes the runner + plugin root-owned at
+`/opt/dev-workflow` (boundary rule 2). This tier is **not gated on
+`agent.enabled`** (a live deployment predates the key) and is **not** set up via
+the plugin. Follow the docs in order:
+
+1. **One repo, in Docker** — build the image, mount a work tree, set the timer:
+   [`../skills/ticket-loop/docker/README.md`](../skills/ticket-loop/docker/README.md).
+2. **Many repos** — the round-robin orchestrator over the same image:
+   [`../skills/ticket-loop/orchestrator/README.md`](../skills/ticket-loop/orchestrator/README.md).
 
 ## Files here
 

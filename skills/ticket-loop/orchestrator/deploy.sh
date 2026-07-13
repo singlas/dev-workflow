@@ -5,16 +5,20 @@
 # There is NO auto-deploy: `git push` alone changes nothing on the box (nothing
 # there watches GitHub). This script runs the manual chain the runbook (§10)
 # spells out — push → remote pull → rebuild → recreate → verify — over ssh, and
-# is the executable source of truth for the `docker run` flags.
+# is the executable source of truth for the `docker run` flags. Config on the
+# volume (roster/env) is driven from the local .local/ dir via `config`.
 #
 # Pick the command by WHAT changed (mirrors the runbook's three update classes):
 #   deploy   — code baked into the image (telegram.py, orchestrator.sh, orch.py,
 #              run-pass.sh, cron-run.sh, queue-count.py, SKILL.md, Dockerfile).
 #              Full chain: rebuild the image, recreate the container.
-#   restart  — config on the VOLUME (roster.yml, orch.env, a project's *.env).
-#              No rebuild; `docker restart` re-reads them (boot lock-clear +
-#              crash recovery make it safe any time). Rewrite the volume file
-#              first (runbook §4/§10), THEN run this.
+#   config   — push local .local/ config to the volume, then restart. The local
+#              .local/ dir is the source of truth: edit roster.yml / orch.env /
+#              a project's *.env there, run `config`, done. Mapping + modes come
+#              from .local/deploy-manifest. Secrets pipe straight into the volume
+#              (never printed, never committed — .local/ is gitignored).
+#   restart  — just reload volume config already in place: `docker restart`, no
+#              rebuild, no push (boot lock-clear + crash recovery make it safe).
 #   status   — container state + a check that the running code matches, + tail.
 #   logs     — follow the live decision log.
 #
@@ -52,14 +56,19 @@ Usage: $0 <command> [--no-push]
   deploy [--no-push]   Full code deploy: push $BRANCH, remote pull, rebuild $IMAGE,
                        recreate the container, verify. --no-push redeploys the
                        box's current HEAD without pushing local commits first.
-  restart              Config-only reload (roster.yml / orch.env / *.env already
-                       rewritten on the volume): docker restart, no rebuild.
+  config               Push local .local/ config (per .local/deploy-manifest) to
+                       the volume, then restart. Edit .local locally, run this.
+  restart              Reload volume config already in place: docker restart, no
+                       rebuild, no push.
   status               Container state + running-code check + recent decisions.
   logs                 Follow the live decision log (Ctrl-C to stop).
 
 Env: HOST, CLAUDE_PIN, IMAGE, VOLUME, CONTAINER, REMOTE_DIR, BRANCH.
 EOF
 }
+
+LOCAL_DIR="$REPO_ROOT/.local"
+MANIFEST="$LOCAL_DIR/deploy-manifest"
 
 log() { printf '\n\033[1m▶ %s\033[0m\n' "$*"; }
 
@@ -142,6 +151,38 @@ REMOTE
   echo "already pulled them above."
 }
 
+cmd_config() {
+  [ -f "$MANIFEST" ] || { echo "ERROR: no manifest at $MANIFEST" >&2; exit 1; }
+  local pushed=0 lfile vpath mode src
+  while read -r lfile vpath mode _rest; do
+    case "$lfile" in ''|'#'*) continue ;; esac
+    if [ -z "$vpath" ] || [ -z "$mode" ]; then
+      echo "WARN: malformed manifest line (need <file> <path> <mode>): $lfile $vpath $mode" >&2
+      continue
+    fi
+    src="$LOCAL_DIR/$lfile"
+    if [ ! -f "$src" ]; then
+      echo "WARN: skip $lfile — not found in $LOCAL_DIR/" >&2
+      continue
+    fi
+    log "push $lfile → $vpath (mode $mode) on $HOST"
+    # Contents pipe over stdin into a root helper container that writes into the
+    # volume, then chown to agent + chmod. Never echoed; the parent dir must
+    # already exist (a project's clone for its <work_tree>/.env).
+    ssh "$HOST" "docker run --rm -i --user root -v '$VOLUME':/home/agent '$IMAGE' \
+      bash -c 'cat > \"$vpath\" && chown 10001:10001 \"$vpath\" && chmod $mode \"$vpath\"'" < "$src" \
+      || { echo "ERROR: failed to push $lfile" >&2; exit 1; }
+    pushed=$((pushed + 1))
+  done < "$MANIFEST"
+  if [ "$pushed" -eq 0 ]; then
+    echo "Nothing pushed — every manifest line is commented or missing."
+    return 0
+  fi
+  log "restart $CONTAINER to pick up config ($pushed file(s) pushed)"
+  ssh "$HOST" docker restart "$CONTAINER"
+  ssh "$HOST" bash -s -- "$CONTAINER" < <(verify_script)
+}
+
 cmd_restart() {
   log "config reload — docker restart $CONTAINER on $HOST (no rebuild)"
   ssh "$HOST" docker restart "$CONTAINER"
@@ -161,6 +202,7 @@ main() {
   local cmd="$1"; shift || true
   case "$cmd" in
     deploy)  cmd_deploy "$@" ;;
+    config)  cmd_config "$@" ;;
     restart) cmd_restart "$@" ;;
     status)  cmd_status "$@" ;;
     logs)    cmd_logs "$@" ;;
