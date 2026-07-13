@@ -34,6 +34,15 @@ projects:
                                          # orchestrator injects orch.env's
                                          # DEFAULT_TELEGRAM_BOT_TOKEN (shared, no-ack)
     state_dir: /home/agent/state/niptao  # state.json, loop.lock, logs, outcome.json
+    # repo: { url: https://github.com/org/niptao.git, branch: main }
+                                         # optional but recommended: the canonical
+                                         # record of WHICH repo this is. HTTPS url
+                                         # even for ssh-cloned repos (onboarding
+                                         # auths with GH_TOKEN). `deploy.sh onboard`
+                                         # clones the work tree from this alone.
+    # enabled: false                     # PAUSE without removing: state kept, marker
+                                         # guard skipped (stage before the clone
+                                         # exists), scheduler never picks it. Default true.
     # model: sonnet                      # optional → TICKET_LOOP_MODEL for the pass
     # tz: Asia/Kolkata                   # optional → TICKET_LOOP_TZ
     # window: "09:00-20:00"              # optional; intersected (tighten-only) with

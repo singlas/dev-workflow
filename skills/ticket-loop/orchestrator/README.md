@@ -61,11 +61,40 @@ one command; pick the verb by **what changed**:
     # LOCAL master in .local/, then push to the volume + restart in one step:
     skills/ticket-loop/orchestrator/deploy.sh config
 
+    # onboard: push config, then CLONE any roster project whose work tree isn't
+    # cloned yet (from repo.url/branch + its GH_TOKEN), then restart:
+    skills/ticket-loop/orchestrator/deploy.sh onboard
+
     # reload volume config already in place (no push), e.g. after a manual edit:
     skills/ticket-loop/orchestrator/deploy.sh restart
 
     skills/ticket-loop/orchestrator/deploy.sh status   # container + running-code check + tail
     skills/ticket-loop/orchestrator/deploy.sh logs     # follow the decision log
+
+**The refresh loop.** `env_file` is a roster field, so a project's secrets and
+its scheduling all resolve from `roster.yml` + the env files it names. To change
+anything, edit the master in `.local/` and run `config` — that pushes it to the
+volume and restarts; the orchestrator re-reads the roster every turn and each
+pass re-sources its env file, so the change takes effect on the next cycle.
+
+**Pausing a project** (`enabled: false` in its roster entry): kept in the roster,
+its state preserved, its startup marker guard skipped, and the scheduler never
+picks it — a clean off-switch that also lets you *stage* a project (add the entry
+paused) before its clone exists. `status` shows it as `PAUSED`. Flip to
+`enabled: true` + `config` to resume.
+
+**`repo: { url, branch }`** is the canonical record of which repo a project is —
+HTTPS url even for ssh-cloned repos (in-container onboarding authenticates with
+the `GH_TOKEN`, not an ssh key). It's what makes *roster entry + env file enough
+to onboard*: `onboard` reads it via `orch.py seed-plan` and clones the work tree,
+so you never hand-type a clone URL.
+
+> **Order matters when the schema changes.** The `enabled`/`repo` fields and
+> `onboard` all ship in the image, so a roster that uses them needs the new code
+> FIRST: run `deploy` (rebuild), THEN `config`/`onboard`. Pushing an `enabled:
+> false` roster to an older image is unsafe — the old code ignores the field,
+> treats the project as live, and its missing clone trips the startup guard →
+> the orchestrator refuses to start (niptao + rasa go down too).
 
 Config via env (defaults match nt): `HOST` (default `nt`), `CLAUDE_PIN`
 (default `2.1.207`, also the image tag), `IMAGE`, `VOLUME`, `CONTAINER`,

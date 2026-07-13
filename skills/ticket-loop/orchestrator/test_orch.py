@@ -7,8 +7,10 @@ Run: python3 skills/ticket-loop/orchestrator/test_orch.py
 can already run dev-workflow/test_validate.py.)
 """
 
+import contextlib
 import datetime
 import importlib.util
+import io
 import json
 import os
 import tempfile
@@ -730,6 +732,163 @@ class TestPassStart(unittest.TestCase):
             st = json.loads(state_path.read_text())
             self.assertEqual(st["pass_started"],
                              {"project": "alpha", "ts": "2026-07-11T12:00:00Z"})
+
+
+class TestEnabledAndRepo(unittest.TestCase):
+    """`enabled` (pause switch) + `repo` (canonical repo record) roster fields."""
+
+    def _load(self, tmp, projects_yaml):
+        root = Path(tmp)
+        for n in ("alpha", "beta"):
+            wt = root / n
+            wt.mkdir(exist_ok=True)
+            (wt / ".dw-agent-clone").touch()
+            (root / f"{n}.env").touch()
+        roster = root / "roster.yml"
+        roster.write_text(f"root: {root}\n{projects_yaml}")
+        return orch.load_roster(roster)
+
+    def test_enabled_defaults_true_and_repo_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self._load(tmp, f"""
+projects:
+  - name: alpha
+    work_tree: {tmp}/alpha
+    env_file: {tmp}/alpha.env
+    state_dir: {tmp}/s-alpha
+""")
+        p = r["projects"][0]
+        self.assertTrue(p["enabled"])
+        self.assertIsNone(p["repo"])
+
+    def test_enabled_false_and_repo_mapping_parsed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self._load(tmp, f"""
+projects:
+  - name: alpha
+    work_tree: {tmp}/alpha
+    env_file: {tmp}/alpha.env
+    state_dir: {tmp}/s-alpha
+    repo: {{url: github.com/o/alpha, branch: dev}}
+  - name: beta
+    work_tree: {tmp}/beta
+    env_file: {tmp}/beta.env
+    state_dir: {tmp}/s-beta
+    enabled: false
+""")
+        by = {p["name"]: p for p in r["projects"]}
+        self.assertTrue(by["alpha"]["enabled"])
+        self.assertEqual(by["alpha"]["repo"], {"url": "github.com/o/alpha", "branch": "dev"})
+        self.assertFalse(by["beta"]["enabled"])
+
+    def test_enabled_quoted_string_coerced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self._load(tmp, f"""
+projects:
+  - name: alpha
+    work_tree: {tmp}/alpha
+    env_file: {tmp}/alpha.env
+    state_dir: {tmp}/s-alpha
+    enabled: "no"
+""")
+        self.assertFalse(r["projects"][0]["enabled"])
+
+    def test_repo_url_branch_forms(self):
+        self.assertEqual(orch._repo_url_branch("github.com/o/r"), ("github.com/o/r", "main"))
+        self.assertEqual(orch._repo_url_branch({"url": "u", "branch": "b"}), ("u", "b"))
+        self.assertEqual(orch._repo_url_branch({"url": "u"}), ("u", "main"))
+        self.assertEqual(orch._repo_url_branch(None), (None, None))
+
+
+class TestPauseScheduling(unittest.TestCase):
+    """A paused project is preserved in state but never scheduled."""
+
+    def roster2(self, tmp):
+        root = Path(tmp)
+        entries = []
+        for name in ("a", "b"):
+            wt = root / name
+            wt.mkdir()
+            (wt / ".dw-agent-clone").touch()
+            entries.append({"name": name, "work_tree": str(wt),
+                            "env_file": str(root / f"{name}.env"),
+                            "state_dir": str(root / f"state-{name}"), "model": None,
+                            "tz": "UTC", "window": None, "cadence": "adaptive",
+                            "interval_s": 1800, "enabled": True, "repo": None})
+        cfg = {k: v for k, v in orch.DEFAULTS.items()}
+        cfg["ladder_s"] = [600, 1200, 2400, 3600]
+        for k in ("interval", "waiting_interval", "force_full_every",
+                  "pass_timeout", "requeue_delay", "crash_park_for"):
+            cfg[k + "_s"] = orch.parse_duration(cfg[k])
+        for k in ("mem_floor_mb", "error_escalate_after", "crash_park_after"):
+            cfg[k] = int(cfg[k])
+        return {"root": str(root), "cfg": cfg, "projects": entries}
+
+    def test_paused_skipped_picks_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = self.roster2(tmp)
+            roster["projects"][0]["enabled"] = False   # pause 'a' (first in RR order)
+            st = {}
+            orch.ensure_projects(st, roster["projects"])
+            d = orch.pick_next(roster, st, NOW)
+            self.assertEqual(d["action"], "run")
+            self.assertEqual(d["project"]["name"], "b")
+
+    def test_all_paused_sleeps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = self.roster2(tmp)
+            for p in roster["projects"]:
+                p["enabled"] = False
+            st = {}
+            orch.ensure_projects(st, roster["projects"])
+            d = orch.pick_next(roster, st, NOW)
+            self.assertEqual(d["action"], "sleep")
+
+    def test_run_now_on_paused_does_not_run_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = self.roster2(tmp)
+            roster["projects"][1]["enabled"] = False   # pause 'b', target it
+            st = {}
+            orch.ensure_projects(st, roster["projects"])
+            d = orch.pick_next(roster, st, NOW, run_now="b")
+            self.assertTrue(d["consume_run_now"])       # file still consumed
+            if d["action"] == "run":
+                self.assertNotEqual(d["project"]["name"], "b")
+
+
+class TestSeedPlan(unittest.TestCase):
+    def test_emits_tsv_only_for_repo_projects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for n in ("alpha", "beta"):
+                wt = root / n
+                wt.mkdir()
+                (wt / ".dw-agent-clone").touch()
+                (root / f"{n}.env").touch()
+            roster = root / "roster.yml"
+            roster.write_text(f"""root: {root}
+projects:
+  - name: alpha
+    work_tree: {root}/alpha
+    env_file: {root}/alpha.env
+    state_dir: {root}/s-alpha
+    repo: {{url: https://github.com/o/alpha.git, branch: main}}
+  - name: beta
+    work_tree: {root}/beta
+    env_file: {root}/beta.env
+    state_dir: {root}/s-beta
+""")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                orch.main(["seed-plan", "--roster", str(roster)])
+        lines = [ln for ln in buf.getvalue().splitlines() if ln]
+        self.assertEqual(len(lines), 1)                       # beta has no repo → skipped
+        cols = lines[0].split("\t")
+        self.assertEqual(cols[0], "alpha")
+        self.assertEqual(cols[1], "https://github.com/o/alpha.git")
+        self.assertEqual(cols[2], "main")
+        self.assertEqual(cols[3], f"{root}/alpha")
+        self.assertEqual(cols[4], f"{root}/alpha.env")
 
 
 if __name__ == "__main__":

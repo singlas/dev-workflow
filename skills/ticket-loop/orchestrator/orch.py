@@ -131,6 +131,12 @@ def load_roster(path):
         cadence = entry.get("cadence", cfg["cadence"])
         if cadence not in ("adaptive", "fixed"):
             raise RosterError(f"{name}: cadence must be adaptive|fixed")
+        # `enabled: false` pauses a project WITHOUT removing it: state is kept
+        # (not pruned), the startup marker guard is skipped (so an entry can be
+        # staged before its clone exists), and the scheduler never picks it.
+        en = entry.get("enabled", True)
+        if isinstance(en, str):
+            en = en.strip().lower() not in ("false", "no", "off", "0", "")
         out.append({
             "name": name,
             "work_tree": str(entry["work_tree"]),
@@ -141,6 +147,12 @@ def load_roster(path):
             "window": entry.get("window"),
             "cadence": cadence,
             "interval_s": parse_duration(entry.get("interval", cfg["interval"])),
+            "enabled": bool(en),
+            # `repo` (optional): the canonical record of WHICH repo this is — a
+            # mapping {url, branch} (or a bare url string). The scheduler does not
+            # use it; `seed-plan` reads it to clone the work tree from the roster
+            # alone, so a roster entry + env file is enough to onboard a project.
+            "repo": entry.get("repo"),
         })
     return {"root": root, "cfg": cfg, "projects": out}
 
@@ -314,11 +326,12 @@ def pick_next(roster, st, now, mem_mb=None, run_now=None):
     if run_now is not None:
         target = next((p for p in projs if p["name"] == run_now), None)
         if target is None and run_now == "":
-            target = projs[0]
-        if target is not None and not _parked(st["projects"][target["name"]], now):
+            target = next((p for p in projs if p.get("enabled", True)), None)
+        if (target is not None and target.get("enabled", True)
+                and not _parked(st["projects"][target["name"]], now)):
             return {"action": "run", "project": target, "force_full": True,
                     "precheck": False, "consume_run_now": True}
-        # unknown/parked name: consume the file (driver deletes it) and fall through
+        # unknown/paused/parked name: consume the file (driver deletes it) and fall through
 
     if mem_mb is not None and mem_mb < cfg["mem_floor_mb"]:
         # consume_run_now here too: an unknown-name run-now file that fell
@@ -332,6 +345,8 @@ def pick_next(roster, st, now, mem_mb=None, run_now=None):
     start = st.get("rr_next", 0) % len(projs)
     for i in range(len(projs)):
         p = projs[(start + i) % len(projs)]
+        if not p.get("enabled", True):
+            continue          # paused: never scheduled, contributes no wake time
         ps = st["projects"][p["name"]]
         if _parked(ps, now):
             waits.append((from_iso(ps["parked_until"]) - now).total_seconds())
@@ -559,7 +574,8 @@ def cmd_startup(args):
     try:
         roster = load_roster(args.roster)
         for p in roster["projects"]:
-            check_work_tree(p, roster["root"])
+            if p.get("enabled", True):        # paused entries may be staged
+                check_work_tree(p, roster["root"])  # before their clone exists
     except RosterError as exc:
         sys.exit(f"FATAL: {exc}")
     now = from_iso(args.now) if args.now else now_utc()
@@ -587,7 +603,8 @@ def cmd_startup(args):
             print(f"WARN: {p['name']}: roster window ∩ repo schedule.window is "
                   "empty — this project will never run", file=sys.stderr)
     save_state(args.state, st)
-    emit(args, {"PROJECTS": " ".join(p["name"] for p in roster["projects"]),
+    emit(args, {"PROJECTS": " ".join(p["name"] + ("" if p.get("enabled", True) else "(paused)")
+                                     for p in roster["projects"]),
                 "CRASH_RECOVERED": crash,
                 "LOCKS_CLEARED": " ".join(cleared),
                 "ESCALATE_OPS": "; ".join(m for lvl, m in esc if lvl == "ops")})
@@ -620,9 +637,41 @@ def cmd_status(args):
             secs = int((from_iso(ne) - now).total_seconds())
             due = f"in {secs // 60}m" if secs > 0 else "now"
         parked = f"  PARKED until {ps['parked_until']}" if ps.get("parked_until") else ""
+        if not p.get("enabled", True):
+            print(f"  {p['name']:<20} PAUSED (enabled: false) — state preserved, not scheduled")
+            continue
         print(f"  {p['name']:<20} last={ps.get('last_outcome') or '—':<14} "
               f"next={due:<8} dry={ps['dry_streak']} err={ps['error_streak']} "
               f"crash={ps['crash_streak']}  cadence={p['cadence']}{parked}")
+    return 0
+
+
+def _repo_url_branch(repo):
+    """Normalize a roster `repo` value to (url, branch) or (None, _). Accepts a
+    mapping {url, branch} or a bare url string; branch defaults to 'main'."""
+    if not repo:
+        return None, None
+    if isinstance(repo, str):
+        return repo, "main"
+    if isinstance(repo, dict):
+        return repo.get("url"), (repo.get("branch") or "main")
+    return None, None
+
+
+def cmd_seed_plan(args):
+    """Emit a clone plan from the roster — one TSV line per project that declares
+    a `repo`: `name\\turl\\tbranch\\twork_tree\\tenv_file`. Paused projects are
+    INCLUDED (staging a paused entry then cloning it is the whole point). The
+    consumer (deploy.sh onboard) skips any work tree already cloned; this command
+    is pure roster→plan and touches nothing."""
+    roster = load_roster(args.roster)
+    for p in roster["projects"]:
+        if args.project and p["name"] != args.project:
+            continue
+        url, branch = _repo_url_branch(p.get("repo"))
+        if not url:
+            continue
+        print("\t".join([p["name"], url, branch, p["work_tree"], p["env_file"]]))
     return 0
 
 
@@ -681,6 +730,12 @@ def main(argv=None):
     p_st = sub.add_parser("status", help="human status table")
     common(p_st)
     p_st.set_defaults(func=cmd_status)
+
+    p_sp = sub.add_parser("seed-plan",
+                          help="emit the roster's clone plan (name url branch work_tree env_file)")
+    p_sp.add_argument("--roster", required=True)
+    p_sp.add_argument("--project", help="limit the plan to one project")
+    p_sp.set_defaults(func=cmd_seed_plan)
 
     args = parser.parse_args(argv)
     return args.func(args)

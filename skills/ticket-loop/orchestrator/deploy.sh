@@ -58,6 +58,9 @@ Usage: $0 <command> [--no-push]
                        box's current HEAD without pushing local commits first.
   config               Push local .local/ config (per .local/deploy-manifest) to
                        the volume, then restart. Edit .local locally, run this.
+  onboard              Push config, then clone any roster project whose work tree
+                       isn't cloned yet (from repo.url/branch + its GH_TOKEN),
+                       then restart. Needs the new image — run 'deploy' first.
   restart              Reload volume config already in place: docker restart, no
                        rebuild, no push.
   status               Container state + running-code check + recent decisions.
@@ -151,7 +154,8 @@ REMOTE
   echo "already pulled them above."
 }
 
-cmd_config() {
+# Push every active manifest file into the volume (no restart). Echoes the count.
+push_config() {
   [ -f "$MANIFEST" ] || { echo "ERROR: no manifest at $MANIFEST" >&2; exit 1; }
   local pushed=0 lfile vpath mode src
   while read -r lfile vpath mode _rest; do
@@ -174,11 +178,56 @@ cmd_config() {
       || { echo "ERROR: failed to push $lfile" >&2; exit 1; }
     pushed=$((pushed + 1))
   done < "$MANIFEST"
-  if [ "$pushed" -eq 0 ]; then
+  echo "$pushed"
+}
+
+cmd_config() {
+  local n; n="$(push_config | tail -1)"
+  if [ "${n:-0}" -eq 0 ]; then
     echo "Nothing pushed — every manifest line is commented or missing."
     return 0
   fi
-  log "restart $CONTAINER to pick up config ($pushed file(s) pushed)"
+  log "restart $CONTAINER to pick up config"
+  ssh "$HOST" docker restart "$CONTAINER"
+  ssh "$HOST" bash -s -- "$CONTAINER" < <(verify_script)
+}
+
+# Clone any roster project whose work tree isn't cloned yet, from the roster
+# ALONE (repo.url/branch) + the project's GH_TOKEN. Requires the NEW image (the
+# in-container `orch.py seed-plan` and `enabled` field ship together) — run
+# `deploy.sh deploy` first if the box is on an older image.
+seed_missing_script() {
+  cat <<'REMOTE'
+set -uo pipefail
+PY="python3"; command -v uv >/dev/null 2>&1 && PY="uv run --quiet --no-project"
+$PY /opt/dev-workflow/bin/orch.py seed-plan --roster /home/agent/roster.yml \
+| while IFS="$(printf '\t')" read -r name url branch wt envf; do
+    [ -n "$name" ] || continue
+    if [ -d "$wt/.git" ]; then echo "onboard: $name already cloned at $wt — skip"; continue; fi
+    tok="$(grep -E '^[[:space:]]*GH_TOKEN=' "$envf" 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' \"'\''')"
+    if [ -z "$tok" ]; then echo "onboard: WARN $name — no GH_TOKEN in $envf, skip"; continue; fi
+    # host/path from either https or ssh remote form; clone over https with the
+    # token embedded once, then scrub it from the stored remote.
+    path="${url#https://github.com/}"; path="${path#git@github.com:}"
+    echo "onboard: cloning $name ($branch) -> $wt"
+    if git clone --branch "$branch" "https://x-access-token:${tok}@github.com/${path}" "$wt"; then
+      git -C "$wt" remote set-url origin "https://github.com/${path}"
+      touch "$wt/.dw-agent-clone"
+      chown -R 10001:10001 "$wt"
+      echo "onboard: $name cloned + marked"
+    else
+      echo "onboard: ERROR $name clone failed (branch '$branch'? token scope?)"
+    fi
+  done
+REMOTE
+}
+
+cmd_onboard() {
+  log "push config to $HOST (roster + env files) before cloning"
+  local n; n="$(push_config | tail -1)"
+  log "clone any missing work trees from the roster on $HOST"
+  ssh "$HOST" "docker run --rm --user root -v '$VOLUME':/home/agent '$IMAGE' bash -s" < <(seed_missing_script)
+  log "restart $CONTAINER"
   ssh "$HOST" docker restart "$CONTAINER"
   ssh "$HOST" bash -s -- "$CONTAINER" < <(verify_script)
 }
@@ -203,6 +252,7 @@ main() {
   case "$cmd" in
     deploy)  cmd_deploy "$@" ;;
     config)  cmd_config "$@" ;;
+    onboard) cmd_onboard "$@" ;;
     restart) cmd_restart "$@" ;;
     status)  cmd_status "$@" ;;
     logs)    cmd_logs "$@" ;;
