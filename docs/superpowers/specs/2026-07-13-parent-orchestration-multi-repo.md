@@ -100,13 +100,14 @@ Layout on the volume:
 Every inbound Telegram message resolves to a target repo BEFORE any tracker
 mutation:
 
-- **Reply to a bot question** → the questions map gives the `ticket`; `get_ticket`
-  → its Linear project → repo. NOTE: today the bridge's questions map is only
-  `{ticket, text, asked_at}` — it does NOT store project/repo, so the reply
-  resolves the repo via a `get_ticket` read (Phase 3 would let the map carry it).
-  Recording the answer (`comment` + drop `blocked`) works by ticket id and must
-  NOT depend on repo resolution — never burn a reply because its project is
-  unmapped/empty.
+- **Reply to a bot question** → the poll line carries `project` (Phase 3 SHIPPED:
+  the bridge records `--project`/`--context` on the question and emits them on the
+  reply), so the reply routes to the repo without a tracker read; `get_ticket` is
+  only the fallback for a legacy question with no recorded project. Recording the
+  answer (`comment` + drop `blocked`) works by ticket id and must NOT depend on
+  repo resolution — never burn a reply because its project is unmapped/empty. A
+  pre-ticket "which project?" clarifier stashes the report in `context`, so a plain
+  reply (naming the project) completes it in one message.
 - **`take PAY-123` / green-light an existing ticket** → read the ticket, route by
   its Linear project field.
 - **`bug:` / `feature:` / `ticket:` / `flag:` (fresh, no ticket yet)** → the repo
@@ -295,11 +296,17 @@ runner/guard/state/bridge contract. New order:
   child's `dev-workflow.yml`, does a trivial change, returns a result, and writes
   NOTHING into the parent's `TICKET_LOOP_STATE_DIR`. If this fails, the design is
   dead — fall back to per-repo-groups (config-only).
-- **Phase 1.** Manager mode (no auto-reset for parent entries) + selector
-  (`agent.skill` → invoke string) + `repos:` schema + validation. Tests.
-- **Phase 2.** The `ticket-loop-parent` skill (only after Phase 0 GO).
-- **Phase 3.** Bridge changes (questions map carries project/repo; pre-ticket
-  disambiguation key). Required for §5, not optional cleanup.
+- **Phase 1. DONE.** Manager mode (no auto-reset for parent entries) + selector
+  (`agent.skill` → invoke string) + `repos:` schema + validation. Tests. (Codex
+  reviewed; fixed the capital-`True` manager coercion + roster `skill:` validation.)
+- **Phase 2. DONE.** The `ticket-loop-parent` skill (authored on Phase 0 GO; Codex
+  SHIP_WITH_CHANGES → all 7 findings fixed).
+- **Phase 3. DONE.** Bridge changes: `telegram.py` question entries carry
+  `project` and a pre-ticket `context`; `poll` emits both; `send --project`/
+  `--context` record them. The skill routes replies via the emitted `project`
+  (get_ticket fallback) and completes disambiguation from `context`.
+- **Remaining:** a live end-to-end test of a parent pass, one comprehensive Codex
+  pass over Phases 1–3, a rebuild, then release.
 
 **Verdict: RETHINK.** The single most important change is manager mode + an
 explicit child-execution primitive with cwd/env/state rebinding. Prove Phase 0

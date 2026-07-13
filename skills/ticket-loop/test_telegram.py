@@ -106,6 +106,7 @@ class TestQuestionsJson(unittest.TestCase):
         self.assertEqual(by_id["4567"]["ticket"], "ABC-123")
         self.assertEqual(by_id["4567"]["text"], "hi")
         self.assertEqual(by_id["9"], {"message_id": "9", "ticket": "OLD-1",
+                                      "project": None, "context": None,
                                       "text": None, "asked_at": None})
 
 
@@ -363,6 +364,120 @@ class TestCmdPollShared(unittest.TestCase):
         self.assertEqual(self.api_params["offset"], 100)
         self.assertEqual([m["message_id"] for m in out], [150])
         self.assertEqual(self.read_offset(), 151)
+
+
+class TestQEntryProjectContext(unittest.TestCase):
+    def test_entry_with_project_and_context(self):
+        e = telegram._q_entry("pay-5", "q", project="pt-api", context="bug: x")
+        self.assertEqual(e["ticket"], "PAY-5")
+        self.assertEqual(e["project"], "pt-api")
+        self.assertEqual(e["context"], "bug: x")
+
+    def test_entry_ticketless_for_disambiguation(self):
+        e = telegram._q_entry(None, "which project?", context="bug: checkout")
+        self.assertIsNone(e["ticket"])
+        self.assertEqual(e["context"], "bug: checkout")
+        self.assertNotIn("project", e)          # omitted when not given
+
+    def test_accessors(self):
+        e = {"ticket": "PAY-5", "project": "pt-api", "context": "c"}
+        self.assertEqual(telegram._q_project(e), "pt-api")
+        self.assertEqual(telegram._q_context(e), "c")
+        self.assertIsNone(telegram._q_project("PAY-5"))   # legacy bare string
+        self.assertIsNone(telegram._q_context({"ticket": "X"}))
+
+
+class TestSendRecordsRouting(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.state_path = Path(self._tmp.name) / "state.json"
+        self._orig_state_path = telegram.STATE_PATH
+        telegram.STATE_PATH = self.state_path
+        self._orig_api = telegram.api
+        telegram.api = lambda method, params, **kw: {"message_id": 900}
+        os.environ["AGENT_TELEGRAM_CHAT_ID"] = "-100777"
+
+    def tearDown(self):
+        telegram.STATE_PATH = self._orig_state_path
+        telegram.api = self._orig_api
+        os.environ.pop("AGENT_TELEGRAM_CHAT_ID", None)
+        self._tmp.cleanup()
+
+    def send(self, text="q", ticket=None, project=None, context=None):
+        with contextlib.redirect_stdout(io.StringIO()):
+            telegram.cmd_send(argparse.Namespace(text=[text], ticket=ticket,
+                                                 project=project, context=context))
+        return (json.loads(self.state_path.read_text())["questions"]
+                if self.state_path.exists() else {})
+
+    def test_ticket_with_project_recorded(self):
+        q = self.send(ticket="PAY-5", project="pt-api")
+        self.assertEqual(q["900"]["ticket"], "PAY-5")
+        self.assertEqual(q["900"]["project"], "pt-api")
+
+    def test_context_only_recorded_without_ticket(self):
+        q = self.send(text="which project?", context="bug: checkout fails")
+        self.assertIsNone(q["900"]["ticket"])
+        self.assertEqual(q["900"]["context"], "bug: checkout fails")
+
+    def test_plain_send_records_nothing(self):
+        self.assertEqual(self.send(text="just an update"), {})
+
+
+class TestPollEmitsRouting(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.state_path = Path(self._tmp.name) / "state.json"
+        self._orig_state_path = telegram.STATE_PATH
+        telegram.STATE_PATH = self.state_path
+        self._orig_api = telegram.api
+        os.environ["AGENT_TELEGRAM_CHAT_ID"] = "-100777"
+        os.environ.pop("TELEGRAM_SHARED_BOT", None)
+
+    def tearDown(self):
+        telegram.STATE_PATH = self._orig_state_path
+        telegram.api = self._orig_api
+        os.environ.pop("AGENT_TELEGRAM_CHAT_ID", None)
+        self._tmp.cleanup()
+
+    def write(self, questions):
+        self.state_path.write_text(json.dumps({"offset": 0, "questions": questions}))
+
+    def reply(self, uid, to_mid, text="ok"):
+        telegram.api = lambda method, params, **kw: [{"update_id": uid, "message": {
+            "message_id": uid, "chat": {"id": -100777},
+            "from": {"is_bot": False, "username": "u", "id": 7}, "text": text,
+            "reply_to_message": {"message_id": to_mid}}}]
+
+    def run_poll(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            telegram.cmd_poll(argparse.Namespace(timeout=0))
+        return [json.loads(l) for l in buf.getvalue().splitlines() if l]
+
+    def test_reply_carries_recorded_project(self):
+        self.write({"500": {"ticket": "PAY-5", "project": "pt-api",
+                            "text": "q", "asked_at": None}})
+        self.reply(600, 500)
+        out = self.run_poll()
+        self.assertEqual(out[0]["ticket"], "PAY-5")
+        self.assertEqual(out[0]["project"], "pt-api")   # routes without a tracker read
+        self.assertIsNone(out[0]["context"])
+
+    def test_pre_ticket_context_reply_has_no_ticket(self):
+        self.write({"500": {"ticket": None, "context": "bug: checkout fails",
+                            "text": "which project?", "asked_at": None}})
+        self.reply(600, 500, "pt-api")
+        out = self.run_poll()
+        self.assertIsNone(out[0]["ticket"])
+        self.assertEqual(out[0]["context"], "bug: checkout fails")
+        self.assertEqual(out[0]["text"], "pt-api")       # the human's answer
+
+    def test_questions_json_exposes_project_context(self):
+        data = telegram.questions_json({"500": {"ticket": "PAY-5", "project": "pt-api",
+                                                "context": "c", "text": "q", "asked_at": None}})
+        self.assertEqual(data[0]["project"], "pt-api")
+        self.assertEqual(data[0]["context"], "c")
 
 
 if __name__ == "__main__":

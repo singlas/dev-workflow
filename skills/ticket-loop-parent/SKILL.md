@@ -223,15 +223,23 @@ message identifies itself:
   bridge already CONSUMED the question-map entry during `poll`, so this reply
   is a one-shot: `comment` `📩 Answer via Telegram (<from>, id <from_id>):
   <text>` on the ticket and drop the **blocked** label, both by id (neither
-  needs a repo). ONLY THEN resolve the repo for the eventual build:
-  `get_ticket` → its Linear **project** → `repos:` → child. If the ticket has
-  no project, or its project maps to no `repos:` entry, the answer is already
-  safely recorded — note it once to the group (`⚠️ ABC-123's project maps to
-  no repo I manage — assign one`) and do NOT try to build it. **Never let a
-  routing failure burn a reply.** *Known optimization (Phase 3): the questions
-  map is `{ticket, text, asked_at}` today and cannot carry project/repo; once
-  it does, the build-side resolve skips the `get_ticket` round-trip. The
-  answer-recording above never needed it.*
+  needs a repo). ONLY THEN resolve the repo for the eventual build: the poll
+  line carries **`project`** when you asked the question with `--project` (the
+  bridge records it against the question message) → `repos:` → child; fall back
+  to `get_ticket`'s project field only for a legacy question with no recorded
+  project. If the ticket has no project, or its project maps to no `repos:`
+  entry, the answer is already safely recorded — note it once to the group
+  (`⚠️ ABC-123's project maps to no repo I manage — assign one`) and do NOT try
+  to build it. **Never let a routing failure burn a reply.** (Always pass
+  `--project <proj>` when you `telegram.py send --ticket …` a question, so its
+  reply routes without a `get_ticket` read.)
+- **Reply to a pre-ticket "which project?" clarifier** — the poll line has
+  `ticket: null` and a **`context`** (the original report you stashed when you
+  asked). The human's reply text names the project (a `repos:` name or a
+  `[tag]`): resolve it, then `create_ticket` FROM THE `context` in that project
+  and continue per the fresh-report rule below. If the reply names no known
+  project, re-ask once. This is how a disambiguation completes in one reply
+  instead of a resend.
 - **`take ABC-123` / green-light / `flag ABC-123` — an existing ticket** →
   `get_ticket`, route by its project field, then apply the single-repo loop's
   handling (queue label on approval, exclude-label refusal, flag label). A
@@ -246,14 +254,17 @@ message identifies itself:
     that project**, and continue per the single-repo loop (queue label
     immediately for bug/feature/ticket; flagged label, no queue, for `flag:`;
     ack in the group).
-  - No tag → ask ONE clarifying question and create NOTHING yet:
-    `❓ Which project — pt-api / pt-web / …? Resend with the tag, e.g. "bug:
-    [pt-api] checkout fails".` (list built from `repos:`). The resend then
-    routes by the tag rule above. **NEVER create in a guessed project.**
-    *Phase 3 note: there is no durable pre-ticket routing key today (the
-    questions map needs a ticket), so the resend-with-tag convention is the
-    stateless bridge until the bridge can record a pending disambiguation;
-    don't try to hold this in memory across passes.*
+  - No tag → ask ONE clarifying question and create NOTHING yet, stashing the
+    original report so a plain reply completes it:
+    `telegram.py send --context '<the original report verbatim>' "❓ Which
+    project — pt-api / pt-web / …? Reply with the project (or resend as
+    'bug: [pt-api] …')."` (list built from `repos:`). The `--context` records
+    the report against the question message, so the human's **reply naming the
+    project** returns on the next poll with `ticket: null` + that `context` (the
+    disambiguation-reply rule above) — you then `create_ticket` from the
+    context in the named project. A resend-with-`[tag]` still works via the tag
+    rule. **NEVER create in a guessed project**, and don't try to hold the
+    pending report in memory across passes — the `context` is the durable key.
 - **Scout proposals** you sent already carry their project (step 8 scouts per
   child project), so a `take ABC-<n>` approval routes cleanly by the ticket's
   project like any green-light.

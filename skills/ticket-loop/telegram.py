@@ -2,14 +2,21 @@
 """Telegram bridge for the ticket-loop skill.
 
 Subcommands:
-  send [--ticket ABC-123] <text...>   Send a message to the agent group; prints {"message_id": N}.
-                                      With --ticket, records message_id -> ticket so a Telegram
-                                      reply to that message matches the ticket on poll.
+  send [--ticket ABC-123] [--project P] [--context C] <text...>
+                                      Send a message to the agent group; prints {"message_id": N}.
+                                      With --ticket, records message_id -> ticket so a Telegram reply
+                                      to that message matches the ticket on poll. --project tags the
+                                      reply with a Linear Project (multi-repo routing without a tracker
+                                      read). --context records a PRE-TICKET question (ticket=None, e.g.
+                                      a "which project?" clarifier) so a plain reply routes back to it.
   poll [--timeout N]                  Long-poll getUpdates (default 25s); prints one JSON line per
                                       new human message in the agent group:
-                                      {message_id, from, from_id, text, ticket, reply_to_message_id, media_path}
-                                      `ticket` is resolved from a reply-to question or an ABC-### prefix
-                                      (any Linear-style TEAM-123 key matches).
+                                      {message_id, from, from_id, text, ticket, project, context,
+                                       reply_to_message_id, media_path}
+                                      `ticket`/`project`/`context` come from the replied-to question
+                                      entry; `ticket` also from an ABC-### prefix (any TEAM-123 key).
+                                      A reply to a pre-ticket clarifier carries `context` with `ticket`
+                                      null.
                                       Photos (and image documents) are downloaded to
                                       <repo>/.agent-loop/media/<message_id>.<ext>; `media_path` carries
                                       the local path (null for text-only messages), `text` the caption.
@@ -158,12 +165,33 @@ def _q_ticket(v):
     return v if isinstance(v, str) else v.get("ticket")
 
 
-def _q_entry(ticket: str, text: str) -> dict:
-    """Build a rich question entry recorded at ask time. asked_at is ISO-8601 UTC
-    with a trailing Z."""
+def _q_project(v):
+    """The Linear Project recorded with a question, or None. Lets a reply route to
+    the right repo (multi-repo parent) without a tracker read; None for legacy
+    entries and single-repo setups."""
+    return None if isinstance(v, str) else v.get("project")
+
+
+def _q_context(v):
+    """The opaque routing context recorded with a PRE-TICKET question (e.g. the
+    original `bug:` report awaiting a 'which project?' answer), or None. Lets a
+    plain reply resolve back to what it answers when no ticket exists yet."""
+    return None if isinstance(v, str) else v.get("context")
+
+
+def _q_entry(ticket, text, project=None, context=None) -> dict:
+    """Build a rich question entry recorded at ask time. `ticket` may be None for a
+    pre-ticket disambiguation entry (carried by `context`). `project` tags the
+    reply with its repo. asked_at is ISO-8601 UTC with a trailing Z."""
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
     asked_at = now.isoformat().replace("+00:00", "Z")
-    return {"ticket": ticket.upper(), "text": text or "", "asked_at": asked_at}
+    entry = {"ticket": (ticket.upper() if ticket else None),
+             "text": text or "", "asked_at": asked_at}
+    if project:
+        entry["project"] = str(project)
+    if context:
+        entry["context"] = context
+    return entry
 
 
 def cmd_send(args: argparse.Namespace) -> None:
@@ -173,9 +201,15 @@ def cmd_send(args: argparse.Namespace) -> None:
         sys.exit("error: empty message")
     result = api("sendMessage", {"chat_id": chat_id, "text": text})
     message_id = result["message_id"]
-    if args.ticket:
+    # Record a question entry whenever this message expects a routed reply: a
+    # ticket-bound question (--ticket), OR a pre-ticket disambiguation (--context,
+    # no ticket yet). --project tags the reply with its repo so the consumer routes
+    # without a tracker read.
+    if getattr(args, "ticket", None) or getattr(args, "context", None):
         state = load_state()
-        state.setdefault("questions", {})[str(message_id)] = _q_entry(args.ticket, text)
+        state.setdefault("questions", {})[str(message_id)] = _q_entry(
+            args.ticket, text, project=getattr(args, "project", None),
+            context=getattr(args, "context", None))
         save_state(state)
     print(json.dumps({"message_id": message_id}))
 
@@ -209,12 +243,20 @@ def download_media(msg: dict):
         return None
 
 
+def resolve_reply(msg: dict, questions: dict):
+    """(reply_message_id, matched question entry or None) for a message that replies
+    to a recorded question. The caller pops the entry — a reply consumes it."""
+    rid = str((msg.get("reply_to_message") or {}).get("message_id"))
+    return rid, questions.get(rid)
+
+
 def match_ticket(msg: dict, questions: dict):
-    """Return the issue key (e.g. ABC-123) this message answers, or None."""
-    reply = msg.get("reply_to_message") or {}
-    via_reply = questions.get(str(reply.get("message_id")))
-    if via_reply:
-        return _q_ticket(via_reply)
+    """Return the issue key (e.g. ABC-123) this message answers, or None — from the
+    replied-to question entry, else a leading TEAM-123 prefix in the text.
+    (project/context come from `resolve_reply`; poll emits them.)"""
+    _rid, entry = resolve_reply(msg, questions)
+    if entry is not None:
+        return _q_ticket(entry)
     prefix = TICKET_RE.match(msg.get("text") or msg.get("caption") or "")
     return prefix.group(1).upper() if prefix else None
 
@@ -241,11 +283,17 @@ def cmd_poll(args: argparse.Namespace) -> None:
         sender = msg.get("from", {})
         if sender.get("is_bot"):
             continue
-        ticket = match_ticket(msg, questions)
-        if ticket:
-            # A reply consumes the question entry; a follow-up question re-records it.
-            reply_id = str((msg.get("reply_to_message") or {}).get("message_id"))
-            questions.pop(reply_id, None)
+        rid, entry = resolve_reply(msg, questions)
+        if entry is not None:
+            # A reply consumes its question entry, and carries the project/context
+            # recorded at ask time (routes without a tracker read; a pre-ticket
+            # disambiguation reply has ticket=None but a context).
+            ticket, project, context = _q_ticket(entry), _q_project(entry), _q_context(entry)
+            questions.pop(rid, None)
+        else:
+            prefix = TICKET_RE.match(msg.get("text") or msg.get("caption") or "")
+            ticket = prefix.group(1).upper() if prefix else None
+            project = context = None
         emitted.append({
             "message_id": msg["message_id"],
             # username is display-level; from_id is the stable identity — record
@@ -254,6 +302,8 @@ def cmd_poll(args: argparse.Namespace) -> None:
             "from_id": sender.get("id"),
             "text": msg.get("text") or (msg.get("caption") or ""),
             "ticket": ticket,
+            "project": project,       # Linear Project for repo routing (or None)
+            "context": context,       # pre-ticket disambiguation payload (or None)
             "reply_to_message_id": (msg.get("reply_to_message") or {}).get("message_id"),
             "media_path": download_media(msg),
         })
@@ -461,18 +511,22 @@ def render_questions(questions, now):
 
 
 def questions_json(questions):
-    """Raw entry list for the agent: [{message_id, ticket, text, asked_at}, …]."""
+    """Raw entry list for the agent:
+    [{message_id, ticket, project, context, text, asked_at}, …]."""
     out = []
     for mid, entry in _sorted_questions(questions):
         if isinstance(entry, dict):
             out.append({
                 "message_id": mid,
                 "ticket": entry.get("ticket"),
+                "project": entry.get("project"),
+                "context": entry.get("context"),
                 "text": entry.get("text"),
                 "asked_at": entry.get("asked_at"),
             })
         else:
-            out.append({"message_id": mid, "ticket": entry, "text": None, "asked_at": None})
+            out.append({"message_id": mid, "ticket": entry, "project": None,
+                        "context": None, "text": None, "asked_at": None})
     return out
 
 
@@ -536,6 +590,9 @@ def main() -> None:
 
     p_send = sub.add_parser("send", help="send a message to the agent group")
     p_send.add_argument("--ticket", help="issue key this question belongs to (records reply matching)")
+    p_send.add_argument("--project", help="Linear Project to tag the reply with (multi-repo routing)")
+    p_send.add_argument("--context", help="opaque payload for a PRE-TICKET question "
+                        "(e.g. a 'which project?' clarifier) so a plain reply routes back")
     p_send.add_argument("text", nargs="*", help="message text (or pipe via stdin)")
     p_send.set_defaults(func=cmd_send)
 
