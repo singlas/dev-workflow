@@ -111,6 +111,25 @@ class ValidateTests(unittest.TestCase):
         errors = _errors_for(cfg)
         self.assertTrue(any("repos must be a non-empty list" in e for e in errors), errors)
 
+    def test_agent_skill_with_colon_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["agent"] = {"skill": "dev-workflow:ticket-loop-parent"}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("bare skill name" in e for e in errors), errors)
+
+    def test_repos_duplicate_project_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["repos"] = [{"project": "pt", "path": "a"}, {"project": "pt", "path": "b"}]
+        errors = _errors_for(cfg)
+        self.assertTrue(any("duplicate project" in e for e in errors), errors)
+
+    def test_parent_repos_with_tracker_project_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["repos"] = [{"project": "pt-api", "path": "pt-api"}]
+        cfg["tracker"]["project"] = "pt-api"     # a parent must NOT scope to one repo
+        errors = _errors_for(cfg)
+        self.assertTrue(any("tracker.project must NOT be set when repos" in e for e in errors), errors)
+
     def test_off_limits_non_list_fails(self):
         cfg = copy.deepcopy(MINIMAL)
         cfg["guardrails"] = {"off_limits": "*.pem"}

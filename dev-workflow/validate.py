@@ -195,11 +195,17 @@ def check(data):
         else:
             if "enabled" in agent and not isinstance(agent["enabled"], bool):
                 errors.append("agent.enabled must be a boolean (true/false)")
-            # agent.skill (optional) — a bare skill NAME the runner invokes (the
-            # roster entry's `skill:` overrides it). agent.manager (optional) —
-            # parent/manager mode: the runner does not reset the work tree.
-            if "skill" in agent and not _nonempty_str(agent.get("skill")):
-                errors.append("agent.skill must be a non-empty string when set")
+            # agent.skill (optional) — a BARE skill NAME the runner invokes (the
+            # roster entry's `skill:` overrides it). No ':' — the runner
+            # namespaces it (/skill or /dev-workflow:skill); a ':' double-prefixes.
+            # agent.manager (optional) — parent/manager mode: no work-tree reset.
+            if "skill" in agent:
+                sk = agent.get("skill")
+                if not _nonempty_str(sk):
+                    errors.append("agent.skill must be a non-empty string when set")
+                elif ":" in sk or any(c.isspace() for c in sk):
+                    errors.append("agent.skill must be a bare skill name "
+                                  "(no ':' or spaces — the runner namespaces it)")
             if "manager" in agent and not isinstance(agent["manager"], bool):
                 errors.append("agent.manager must be a boolean (true/false)")
 
@@ -211,6 +217,7 @@ def check(data):
         if not isinstance(repos, list) or not repos:
             errors.append("repos must be a non-empty list when set")
         else:
+            seen_projects, seen_paths = set(), set()
             for i, r in enumerate(repos):
                 if not isinstance(r, dict):
                     errors.append("repos[%d] must be a mapping" % i)
@@ -218,6 +225,22 @@ def check(data):
                 for k in ("project", "path"):
                     if not _nonempty_str(r.get(k)):
                         errors.append("repos[%d].%s must be a non-empty string" % (i, k))
+                # 1 project -> 1 child: duplicates break routing (a ticket's project
+                # must resolve to exactly one clone).
+                proj, path = r.get("project"), r.get("path")
+                if _nonempty_str(proj):
+                    if proj in seen_projects:
+                        errors.append("repos: duplicate project %r (each maps to one child)" % proj)
+                    seen_projects.add(proj)
+                if _nonempty_str(path):
+                    if path in seen_paths:
+                        errors.append("repos: duplicate path %r" % path)
+                    seen_paths.add(path)
+            # A parent config (repos: present) reads the WHOLE team — a
+            # tracker.project here would wrongly scope the product to one repo.
+            if isinstance(tracker, dict) and tracker.get("project"):
+                errors.append("tracker.project must NOT be set when repos: is present "
+                              "(a parent reads the whole team; per-repo scope lives in each child)")
 
     # schedule.window format.
     schedule = data.get("schedule")

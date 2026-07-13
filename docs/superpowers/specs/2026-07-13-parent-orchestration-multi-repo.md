@@ -194,6 +194,21 @@ a product are explicitly out of scope (§12).
 - **One orchestrator process.** No orchestrator-level singleton lock exists
   (Codex [A]); the single-process assumption holds as today.
 
+### Deployment constraints for a parent entry (integration-review findings)
+
+- **Set `manager: true` in the ROSTER entry, not only the repo config.** The
+  roster path injects `DW_MANAGER=1`, which does NOT depend on config resolution;
+  the repo's `agent.manager` is a fallback that a dw-config resolution miss would
+  defeat — and then the parent checkout gets `git reset --hard` like a disposable
+  tree. Roster `manager: true` is the hard guarantee. (Same for `skill:`.)
+- **A parent MUST have its OWN Telegram bot token** in its env file (normal
+  offset-acking, sole consumer). Never the shared `DEFAULT_TELEGRAM_BOT_TOKEN`
+  fallback — that injects `TELEGRAM_SHARED_BOT=1`, which the parent skill forbids
+  (no-ack mode is for single-repo tenants sharing a bot across separate groups).
+- **A broken parent pass now escalates.** rc=0 with no `outcome.json` (a
+  config-read failure / early exit) classifies as `error`, not `dry`, so a broken
+  deploy surfaces on the error streak instead of silently backing off.
+
 ## 12. Out of scope (explicit)
 
 - Cross-repo tickets (one ticket touching 2 repos) — parked; the 1-ticket-1-repo

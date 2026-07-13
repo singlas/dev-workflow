@@ -151,9 +151,11 @@ def load_roster(path):
         skill = None
         if sk not in (None, ""):
             sk = str(sk).strip()
-            if not sk or not all(c.isalnum() or c in ":_-" for c in sk):
-                raise RosterError(f"{name}: skill must be a simple skill name "
-                                  f"(letters/digits and : _ -), got {entry.get('skill')!r}")
+            # BARE name only (no ':') — the runner namespaces it to /skill or
+            # /dev-workflow:skill; a value with ':' would double-prefix.
+            if not sk or not all(c.isalnum() or c in "_-" for c in sk):
+                raise RosterError(f"{name}: skill must be a bare skill name "
+                                  f"(letters/digits and _ -, no ':'), got {entry.get('skill')!r}")
             skill = sk
         # `enabled: false` pauses a project WITHOUT removing it: state is kept
         # (not pruned), the startup marker guard is skipped (so an entry can be
@@ -463,7 +465,12 @@ def classify_pass(rc, timed_out, outcome, log_tail, questions_count):
     if any("Background tasks still running" in line for line in log_tail):
         return "error", "background-guillotine WARN (a build was likely killed)"
     if outcome is None:
-        return "dry", "no outcome.json written (counting as dry)"
+        # A healthy pass ALWAYS writes outcome.json as its last act (skill
+        # contract), so rc=0 with no outcome means the skill did NOT finish — a
+        # config-read failure, early exit, or crash. Classify as error so a broken
+        # deploy ESCALATES instead of silently backing off on the dry ladder (the
+        # one legitimate no-outcome case, a lock-yield, is caught above).
+        return "error", "pass exited 0 but wrote no outcome.json (skill did not finish)"
     if outcome.get("error"):
         return "error", f"pass reported: {outcome['error']}"
     if outcome.get("pr_opened", 0) > 0 or outcome.get("progressed"):

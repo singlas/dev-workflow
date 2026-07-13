@@ -445,8 +445,10 @@ class TestClassify(unittest.TestCase):
         tail = ["[2026-07-11 12:00:00 UTC] skip: held by interactive pid 4242"]
         self.assertEqual(self.c(outcome=None, log_tail=tail), "skipped-lock")
 
-    def test_missing_outcome_otherwise_dry(self):
-        self.assertEqual(self.c(outcome=None), "dry")
+    def test_missing_outcome_otherwise_error(self):
+        # rc=0 but no outcome.json (not a lock-yield) = the skill did not finish
+        # (config-read failure / early exit) — escalate as error, not fake-dry.
+        self.assertEqual(self.c(outcome=None), "error")
 
 
 class TestCurrentPassSegment(unittest.TestCase):
@@ -816,15 +818,16 @@ projects:
 
     def test_bad_skill_rejected(self):
         # a non-simple skill value would become a malformed "/…" invoke string
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(orch.RosterError):
-                self._load(tmp, f"""
+        for bad in ("rm -rf /", "dev-workflow:ticket-loop-parent"):  # spaces, ':' double-prefix
+            with tempfile.TemporaryDirectory() as tmp:
+                with self.assertRaises(orch.RosterError):
+                    self._load(tmp, f"""
 projects:
   - name: alpha
     work_tree: {tmp}/alpha
     env_file: {tmp}/alpha.env
     state_dir: {tmp}/s-alpha
-    skill: "rm -rf /"
+    skill: "{bad}"
 """)
 
     def test_repo_url_branch_forms(self):
