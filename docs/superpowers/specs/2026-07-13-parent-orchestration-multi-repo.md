@@ -1,7 +1,8 @@
 # Parent orchestration: one product, many repos, one board, one group
 
-**Status:** RETHINK (Codex review 2026-07-13, see §16) — do NOT build phase 2
-until the §16 prototype passes. **Date:** 2026-07-13. **Target:** a 5.x minor.
+**Status:** Phase 0 GO (2026-07-13) — the load-bearing unknown is PROVEN (§17);
+proceed to Phase 1. Codex's other findings (§16) stand as required engineering,
+not blockers. **Date:** 2026-07-13. **Target:** a 5.x minor.
 **Depends on:** `tracker.project` (v0.5.1/0.5.2), `DEFAULT_CLAUDE_CODE_OAUTH_TOKEN`
 + `DEFAULT_TELEGRAM_BOT_TOKEN` (orch.env), the existing subagent-implementation
 pattern in `skills/ticket-loop/SKILL.md`.
@@ -285,3 +286,30 @@ runner/guard/state/bridge contract. New order:
 **Verdict: RETHINK.** The single most important change is manager mode + an
 explicit child-execution primitive with cwd/env/state rebinding. Prove Phase 0
 before writing any parent-skill code.
+
+## 17. Phase 0 result (2026-07-13): GO
+
+Ran the GO/NO-GO prototype locally. Layout faithful to §4 (child clone as a
+subfolder of the parent; parent has a `.agent-loop/state.json` sentinel). A parent
+`claude -p ... --dangerously-skip-permissions --model claude-opus-4-8` pass was
+told to DELEGATE (not do the work) via a subagent operating entirely in `./child`.
+
+Independently verified (not the model's self-report):
+- **Subagent read the child's config + worked in the child dir** — wrote
+  `child/RESULT.txt` = `PROTOTYPE BUILD OK: pytest pt_api/` (the child's real
+  `quality.test`).
+- **Subagent did git ops in the child repo** — branch `proto-1`, new commit on top
+  of the child's own history.
+- **Parent state untouched** — `parent/.agent-loop/state.json` byte-identical
+  (sha matched the pre-run sentinel); no stray files created under it.
+- **No parent-checkout mutation** — the work landed only in the child.
+
+Conclusion: cross-worktree subagent dispatch from a headless parent pass, with
+isolated parent state, WORKS. The design is not dead. Remaining §16 items
+(manager mode / no auto-reset, `agent.skill` selector value shape, `repos:`
+schema, result signal-back into the orchestrator STATE_DIR, Telegram bridge repo
+identity, env scrub on dispatch) are tractable engineering. Proceed to Phase 1.
+
+NOT tested here (known, deferred to Phase 1 — they are engineering, not unknowns):
+run-pass.sh's auto-`reset --hard` of the parent work tree (the manager-mode fix),
+the selector plumbing, and signalling the build outcome back to the orchestrator.
