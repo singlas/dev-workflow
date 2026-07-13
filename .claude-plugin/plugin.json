@@ -7,6 +7,7 @@
   },
   "homepage": "https://github.com/singlas/dev-workflow",
   "repository": "https://github.com/singlas/dev-workflow",
+  "license": "MIT",
   "keywords": [
     "workflow",
     "tickets",
