@@ -33,7 +33,7 @@ except ImportError:
 
 ALLOWED_TOP = {"repo", "tracker", "chat", "quality", "version", "deploy",
                "board", "guardrails", "build", "schedule", "hooks", "runtime",
-               "blog"}
+               "blog", "agent"}
 REQUIRED = {"repo": ["base_branch", "prod_branch"], "tracker": ["provider", "team", "ticket_prefix"]}
 BASELINE_OFF_LIMITS = [".env*", "*.key", "*.pem", "credentials.json",
                        ".claude/settings*", ".github/workflows/**"]
@@ -177,6 +177,19 @@ def check(data):
             for field in ("skill", "posts_dir", "publish"):
                 if field in blog and not _nonempty_str(blog[field]):
                     errors.append("blog.%s must be a non-empty string" % field)
+
+    # agent (optional) — the v2 local-agent FEATURE OPT-IN, not a guardrail. It is
+    # deliberately independent of the tighten-only ceilings: `enabled` never raises
+    # or lowers a cap, it only turns the local autonomous tier (the ticket-loop skill
+    # + install-cron.sh) on. Default OFF — an absent section or key means disabled;
+    # the runner/skill treat anything but exactly true as opt-out. `true`/`false` are
+    # both valid; a non-boolean is an error.
+    agent = data.get("agent")
+    if agent is not None:
+        if not isinstance(agent, dict):
+            errors.append("agent must be a mapping")
+        elif "enabled" in agent and not isinstance(agent["enabled"], bool):
+            errors.append("agent.enabled must be a boolean (true/false)")
 
     # schedule.window format.
     schedule = data.get("schedule")

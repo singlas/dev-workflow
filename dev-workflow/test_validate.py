@@ -167,5 +167,41 @@ class ValidateTests(unittest.TestCase):
         self.assertTrue(any("dep_blocked" in e for e in errors), errors)
 
 
+    # ── agent (v2 local-agent opt-in) ────────────────────────────────────────
+    def test_agent_absent_still_validates(self):
+        # No agent section at all → valid (feature defaults OFF).
+        cfg = copy.deepcopy(MINIMAL)
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_agent_enabled_true_passes(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["agent"] = {"enabled": True}
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_agent_enabled_false_passes(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["agent"] = {"enabled": False}
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_agent_enabled_non_bool_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["agent"] = {"enabled": "yes"}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("agent.enabled" in e for e in errors), errors)
+
+    def test_agent_enabled_int_fails(self):
+        # bool is a subclass of int; a plain int must still be rejected.
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["agent"] = {"enabled": 1}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("agent.enabled" in e for e in errors), errors)
+
+    def test_agent_non_mapping_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["agent"] = "true"
+        errors = _errors_for(cfg)
+        self.assertTrue(any("agent" in e for e in errors), errors)
+
+
 if __name__ == "__main__":
     unittest.main()

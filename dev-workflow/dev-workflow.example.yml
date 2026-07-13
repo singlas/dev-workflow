@@ -83,6 +83,18 @@ build:
   model: sonnet                  # model id the loop pins each headless pass to
   cap_per_pass: 2                # max tickets built per loop pass
 
+# v2 opt-in: the LOCAL autonomous agent tier (the `ticket-loop` skill + its
+# launchd/cron installer, `install-cron.sh`). OFF by default — omit this section
+# (or leave enabled:false) and both the interactive `/ticket-loop` skill and
+# `install-cron.sh` refuse with an opt-in message. Set `enabled: true` to run a
+# local autonomous agent on YOUR machine: it works the queue, asks questions in
+# Telegram, and opens one PR per ticket (you still supply the loop's env — see
+# skills/ticket-loop/env.example). This is a feature switch, NOT a guardrail: it
+# never loosens a ceiling. The v3 remote Docker runner / orchestrator is a separate
+# repo-level track and is NOT gated by this key.
+# agent:
+#   enabled: false
+
 # When the autonomous loop is allowed to run.
 schedule:
   window: "09:00-20:00"          # HH:MM-HH:MM local working window
