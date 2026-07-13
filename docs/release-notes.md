@@ -1,5 +1,24 @@
 # Release notes
 
+## v0.5.1
+
+**Multi-repo tracking: one Linear team, one Project per repo.** A new optional
+`tracker.project` in `dev-workflow.yml` scopes a repo to a single Linear Project
+inside a team shared across repos — a multi-repo product (e.g. a backend split
+across services) or one personal team spanning several hobby repos. Each repo
+works only its own slice of the shared board; omit the field and everything is
+team-only exactly as before.
+
+- Every read/create verb (`queue_count`, `list_actionable`, `create_ticket`)
+  additionally filters/sets the Linear Project when `tracker.project` is set.
+- Issue **identifiers stay team-scoped** — all repos in the team share its key
+  prefix; the Project field, not the key, distinguishes the repo. (Distinct
+  prefixes still mean distinct teams — that's the one-team-per-repo model.)
+- Pure tracker-layer: works for a plain developer running the interactive skills
+  in one repo of a shared team — no Docker or orchestrator required.
+- `validate.py` type-checks the field; `tracker-adapters.md` and the example
+  config document it.
+
 ## v0.5.0
 
 **Tiered install + the multi-project orchestrator.** The plugin now presents three
