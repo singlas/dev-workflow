@@ -1,5 +1,25 @@
 # Release notes
 
+## v0.6.0
+
+**Passive intake parking-lot for the parent loop.** A new optional
+`tracker.intake_project` on a parent config gives `ticket-loop-parent` a durable,
+human-visible home for reported work that isn't (or never will be) agent-built.
+An untagged report in the shared Telegram group is *captured* as a real Linear
+ticket in the intake Project (no queue label, one mutation, acked to the group),
+and a projectless ticket the agent trips over is *parked* there instead of
+dead-ended — both surface in the digest for a human to triage. Triage stays a
+human act: move a ticket into a `repos:` project and green-light it to make it
+agent work, or leave it to keep it human-owned. The agent never builds an intake
+ticket; build stays gated by the queue label, and the intake Project is asserted
+out of `repos:` in the validator so an intake ticket can never be auto-built.
+Three durable write-safety points live in the parent's `state.json`
+(`captured_reports` message→ticket dedup, park-before-move re-read, green-light
+reconcile-to-terminal-state), and digest sections are keyed by project not label
+so a stray queue label can't double-count. Purely additive: an unset
+`intake_project` behaves exactly as before (ask-and-stash for a fresh report,
+flag-and-refuse for a projectless/unmapped ticket).
+
 ## v0.5.3
 
 **Parent orchestration: one product, many repos, one board, one group.** A new
