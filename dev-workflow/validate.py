@@ -96,6 +96,10 @@ def check(data):
         # team shared across repos. When present it must be a non-empty string.
         if "project" in tracker and not _nonempty_str(tracker.get("project")):
             errors.append("tracker.project must be a non-empty string when set")
+        # tracker.intake_project (optional, PARENT-ONLY) — the durable parking-lot
+        # Project. When present it must be a non-empty string.
+        if "intake_project" in tracker and not _nonempty_str(tracker.get("intake_project")):
+            errors.append("tracker.intake_project must be a non-empty string when set")
         # tracker.roles — when present, the role→name bindings must be filled.
         roles = tracker.get("roles")
         if isinstance(roles, dict):
@@ -114,6 +118,12 @@ def check(data):
                     errors.append(
                         "tracker.roles.%s.label must be a non-empty string when set" % role
                     )
+
+    # tracker.intake_project is PARENT-ONLY — it only means something when repos:
+    # is present (a parking lot for reported work not yet routed to a child repo).
+    if isinstance(tracker, dict) and "intake_project" in tracker and data.get("repos") is None:
+        errors.append("tracker.intake_project is only meaningful in a parent config "
+                      "(repos: present)")
 
     # board (optional) — gate labels + prune policy. All keys optional; a repo
     # without them still validates.
@@ -241,6 +251,12 @@ def check(data):
             if isinstance(tracker, dict) and tracker.get("project"):
                 errors.append("tracker.project must NOT be set when repos: is present "
                               "(a parent reads the whole team; per-repo scope lives in each child)")
+            # The intake parking lot must never be one of the child projects — an
+            # intake ticket must never be buildable.
+            if isinstance(tracker, dict) and _nonempty_str(tracker.get("intake_project")) \
+                    and tracker.get("intake_project") in seen_projects:
+                errors.append("tracker.intake_project %r must NOT be one of the repos: projects "
+                              "(an intake ticket must never be buildable)" % tracker.get("intake_project"))
 
     # schedule.window format.
     schedule = data.get("schedule")

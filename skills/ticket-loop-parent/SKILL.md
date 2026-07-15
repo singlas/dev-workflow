@@ -67,7 +67,7 @@ if command -v dw-config >/dev/null 2>&1 && dw-config 2>&1 | grep -q -- '--batch'
 elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DW="uv run ${CLAUDE_PLUGIN_ROOT}/dev-workflow/dw-config.py" # plugin install
 else DW="uv run dev-workflow/dw-config.py"; fi                                                          # framework checkout
 [ -f dev-workflow.yml ] \
-  && $DW dev-workflow.yml --batch tracker.team tracker.project= tracker.roles.queue.label tracker.roles.queue.states \
+  && $DW dev-workflow.yml --batch tracker.team tracker.project= tracker.intake_project= tracker.roles.queue.label tracker.roles.queue.states \
        tracker.roles.blocked.label tracker.roles.exclude.labels tracker.roles.done.state \
        chat.provider agent.skill build.model build.cap_per_pass \
        guardrails.diff_budget.max_lines guardrails.diff_budget.max_files \
@@ -83,6 +83,15 @@ else DW="uv run dev-workflow/dw-config.py"; fi                                  
   (`TELEGRAM_SHARED_BOT` must NOT be set — no-ack mode exists only for
   single-repo tenants sharing a default bot; if it is set here, stop and flag
   it).
+- **`tracker.intake_project`** (OPTIONAL) — the durable **parking lot** Project.
+  When set, an untagged report in the group is **captured** as a real ticket
+  here (no queue label), and a projectless ticket is **parked** here rather than
+  left loose; both then surface in the digest's intake section for a human to
+  triage. It is never a `repos:` entry and an intake ticket is never buildable —
+  the agent only ever builds a ticket once a human has routed it into a `repos:`
+  project and green-lit it. When **unset**, this skill behaves exactly as today
+  (ask-and-stash for a fresh untagged report; flag-and-refuse for a projectless
+  or unmapped ticket) — the key is purely additive.
 - **`repos:`** — the routing table, a list of `{project, path, url}`: Linear
   Project name → child clone dir under the parent (→ clone URL for seeding).
   This is a list of maps, not a scalar — read it from the YAML directly, not
@@ -136,6 +145,23 @@ workflows, and each repo's `dev-workflow.yml` are off-limits; pass that section
    parent state in the subagent's environment**, so a child helper physically
    CANNOT write the parent's `state.json` / media / `outcome.json`. This is a
    parent action enforced on dispatch, not a promise asked of the subagent.
+5. **Intake is never buildable, and the agent never build-scans team-wide.**
+   Build selection (`queue_count` / `list_actionable`) is scoped to a `repos:`
+   child Project AND gated by the queue label — the queue label is the PRIMARY
+   build trigger; the project-in-`repos:` check is belt-and-suspenders.
+   `intake_project` is excluded by construction (it is never a `repos:` entry),
+   and you must assert it before dispatch: refuse to build any ticket whose
+   project is not a `repos:` entry. **Never run an unscoped "all actionable"
+   query** across the team. The one exception to "the agent never routes" is the
+   intake→repo green-light (step 2 / 4h) — the sole agent-vs-human *routing*
+   race: always `get_ticket` immediately before that move and honor a human's
+   out-of-band change if one landed first.
+
+**Config footgun — adding a project to `repos:` does NOT auto-build its
+pre-existing tickets.** Building still requires the queue label, which the agent
+only applies on an explicit green-light. So a mid-stream mapping change (a new
+`repos:` entry, an intake ticket moved into a mapped project) can never silently
+promote an old, pre-existing ticket to buildable — a human must green-light it.
 
 ## Foreground, serial builds — one child repo per pass
 
@@ -241,12 +267,39 @@ message identifies itself:
   project, re-ask once. This is how a disambiguation completes in one reply
   instead of a resend.
 - **`take ABC-123` / green-light / `flag ABC-123` — an existing ticket** →
-  `get_ticket`, route by its project field, then apply the single-repo loop's
-  handling (queue label on approval, exclude-label refusal, flag label). A
-  ticket whose project is **empty/None** or maps to **no `repos:` entry** is
-  UNBUILDABLE: reply once `⚠️ ABC-123 has no project / maps to no repo I
-  manage — assign a project first`, and do NOT queue or build it. (Flagging
-  for the weekly checklist is fine — it never builds.)
+  `get_ticket`, then dispatch on its project field:
+  - **Project maps to a `repos:` entry** → apply the single-repo loop's handling
+    (queue label on approval, exclude-label refusal, flag label).
+  - **Ticket still in `intake_project`** (a `take` / green-light on a captured
+    report) → this is the intake→repo hand-off; ask ONE routing question:
+    `telegram.py send --ticket ABC-123 --context 'green-light: <title>' "❓
+    Which repo should I build ABC-123 in — pt-api / pt-web / …?"` (list from
+    `repos:`), set the **blocked** label, and do NOT move or queue yet. **Skip
+    the ask if a questions-map entry already exists for this ticket** (the
+    once-key). **On the reply (CAS #3 — reconcile to ANY terminal/routed
+    state):** `get_ticket` FIRST. If the ticket is already in a `repos:`
+    project, already carries the queue label, or is in any terminal state
+    (done / canceled / closed), do NOT blindly move+queue — reconcile to the
+    current state, clear **blocked** if appropriate, and STOP (a human beat you
+    to it). Otherwise `move` it into the named repo's project, apply the queue
+    label, clear **blocked**. Only now does it enter steps 3–7.
+  - **Projectless (project empty/None)** → **park it (CAS #2)** if
+    `intake_project` is set: `get_ticket` to re-read, and only if `project` is
+    STILL null, `move`/assign it into `intake_project` (idempotent — if already
+    in intake, skip). **A human who assigned a real repo between read and write
+    WINS** — never overwrite valid routing back into intake. Parked, it lives in
+    the intake digest section (no separate flag needed). If `intake_project` is
+    unset, keep today's behavior: reply once `⚠️ ABC-123 has no project — assign
+    a project first`, and do NOT queue or build it.
+  - **Non-empty but UNMAPPED project** (not in `repos:`, not `intake_project`) →
+    **leave it in place, never build it**, and surface it in the **persistent,
+    recurring** Unroutable digest line (see step 8) until a human fixes the
+    mapping — do NOT rely on a one-shot flag that lets misconfigured work vanish.
+    Guard re-flag noise for any group ping via `flagged_unmapped` (ping once per
+    ticket id); the digest line recurs by design.
+  - All of projectless / unmapped / still-in-intake remain **UNBUILDABLE** until
+    a human routes them into a `repos:` project and green-lights. (Flagging for
+    the weekly checklist is always fine — it never builds.)
 - **Fresh `bug:` / `feature:` / `ticket:` / `flag:` (no ticket yet)** — the
   repo is ambiguous by construction:
   - The message carries an explicit project tag — `bug: [pt-api] checkout
@@ -254,17 +307,27 @@ message identifies itself:
     that project**, and continue per the single-repo loop (queue label
     immediately for bug/feature/ticket; flagged label, no queue, for `flag:`;
     ack in the group).
-  - No tag → ask ONE clarifying question and create NOTHING yet, stashing the
-    original report so a plain reply completes it:
-    `telegram.py send --context '<the original report verbatim>' "❓ Which
-    project — pt-api / pt-web / …? Reply with the project (or resend as
-    'bug: [pt-api] …')."` (list built from `repos:`). The `--context` records
-    the report against the question message, so the human's **reply naming the
-    project** returns on the next poll with `ticket: null` + that `context` (the
-    disambiguation-reply rule above) — you then `create_ticket` from the
-    context in the named project. A resend-with-`[tag]` still works via the tag
-    rule. **NEVER create in a guessed project**, and don't try to hold the
-    pending report in memory across passes — the `context` is the durable key.
+  - No tag → the branch depends on whether `intake_project` is set:
+    - **`intake_project` SET → passive capture (capture-dedup).** First check
+      `captured_reports[message_id]`; if present, this is a re-delivered message
+      — skip it (idempotent, no duplicate ticket). Otherwise `create_ticket` in
+      `intake_project`, body = the verbatim report, **NO queue label**; record
+      `captured_reports[message_id] = <new ticket id>`; ack in the group `📥
+      Captured ABC-<n> in Intake — <title>. Move it to a repo + green-light for
+      the agent, or leave it for a human.` Exactly ONE mutation. Do NOT
+      proactively ask "which repo?" — capture is passive; a human triages it.
+    - **`intake_project` UNSET → today's behavior unchanged:** ask ONE
+      clarifying question and create NOTHING yet, stashing the original report so
+      a plain reply completes it: `telegram.py send --context '<the original
+      report verbatim>' "❓ Which project — pt-api / pt-web / …? Reply with the
+      project (or resend as 'bug: [pt-api] …')."` (list built from `repos:`).
+      The `--context` records the report against the question message, so the
+      human's **reply naming the project** returns on the next poll with
+      `ticket: null` + that `context` (the disambiguation-reply rule above) —
+      you then `create_ticket` from the context in the named project. A
+      resend-with-`[tag]` still works via the tag rule. **NEVER create in a
+      guessed project**, and don't try to hold the pending report in memory
+      across passes — the `context` is the durable key.
 - **Scout proposals** you sent already carry their project (step 8 scouts per
   child project), so a `take ABC-<n>` approval routes cleanly by the ticket's
   project like any green-light.
@@ -454,6 +517,20 @@ each PR line carries its project tag — `[pt-api] #12 ABC-<n> <title>` — so o
 message reads cleanly across repos. Ticket-derived sections are team-wide
 queries as-is.
 
+**Ticket-derived sections are keyed by PROJECT, not label** (this is what closes
+the stray-queue-label double-count — a ticket in intake that somehow carries a
+queue label counts as Intake, never as Queued):
+- **📥 Intake — awaiting triage (N):** tickets where `project == intake_project`
+  (regardless of labels), oldest first, `[age]` per line. Optional pressure
+  line: `⚠️ N tickets >14d in intake`. Omit this whole section when
+  `intake_project` is unset/empty.
+- **⚠️ Unroutable (project not in `repos:` and not intake): N** — persistent,
+  recurs every digest until a human fixes the mapping (do NOT let it vanish
+  after one flag).
+- **📋 Queued** = `project ∈ repos:` **AND** the queue label — now mutually
+  exclusive from Intake by project. The digest is **READ-ONLY** and its counts
+  NEVER feed control flow.
+
 ### 9. Pass outcome line — the LAST act of every pass
 
 Write the one-line JSON summary to **the PARENT's**
@@ -480,6 +557,12 @@ toward `progressed`. A subagent never writes this file.
 - Flagging an **unmapped / projectless** ticket to the group (step 2) counts
   as `progressed = true` (a human was told to act); it is neither `asked` nor
   `blocked`.
+- **Capturing** an untagged report into `intake_project` and **parking** a
+  projectless ticket into `intake_project` (step 2) each count as
+  `progressed = true` — a durable artifact was created or placed; neither is
+  `asked` nor `blocked`. NOTE: a capture-only pass therefore stays "warm"
+  (`progressed = true`), so idle-ping / backoff won't fire on it. That is
+  intentional — capturing a real report is real work.
 - A subagent's PR → `picked += 1`, `pr_opened += 1`; needs-input →
   `asked += 1`, `blocked += 1`; failure → `progressed` only if something else
   advanced.
@@ -490,7 +573,19 @@ toward `progressed`. A subagent never writes this file.
   `<parent>/.agent-loop/`): Telegram offset + questions map,
   `last_digest` / `last_scout` / `last_hygiene`, `idle_pinged`, the
   round-robin `repo_cursor`, plus `outcome.json` and downloaded media. The
-  parent is the SOLE writer.
+  parent is the SOLE writer. When `intake_project` is in play it ALSO holds the
+  intake durability index — the intake Project gives human-visible durability,
+  not machine idempotency, so the once-keys live here too:
+  - `captured_reports` — a map `telegram_message_id -> intake_ticket_id`. This
+    is BOTH the capture idempotency key AND the follow-up link; check it before
+    every capture `create_ticket` (step 2) so a re-delivered message never mints
+    a duplicate intake ticket.
+  - `flagged_unmapped` — a set of ticket ids already flagged as unroutable, so
+    "flag once" is a durable machine marker. NOT comment/label matching, and NOT
+    the overloaded `blocked` label.
+  - The existing **questions map** already serves as the routing-question
+    once-key: a routing / "which repo?" question is NOT re-asked while a
+    questions-map entry exists for that ticket.
 - **Per-child execution state** — each child clone's own `.agent-loop` for
   build-local scratch only. No routing state, no stamps, no outcome.
 

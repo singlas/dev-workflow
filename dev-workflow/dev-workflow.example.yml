@@ -26,6 +26,15 @@ tracker:
                                   # this Project. Keys stay team-scoped (all repos
                                   # share `ticket_prefix`); the Project distinguishes
                                   # the repo. Omit for a one-team-per-repo setup.
+  # intake_project: Intake        # PARENT-ONLY (only meaningful when repos: is present).
+                                  # A Linear Project used as the durable parking lot for
+                                  # reported work not yet (or ever) routed to a child repo.
+                                  # Untagged reports land here with NO queue label; the agent
+                                  # never builds an intake ticket. A human triages: move it
+                                  # into a repos: project + green-light to make it agent work,
+                                  # or leave/assign it to keep it human-owned. Must NOT be one
+                                  # of the repos: projects. Distinct from tracker.project
+                                  # (which stays unset in a parent config).
   roles:                          # map framework roles -> your board's own label/state names
     queue:   { label: agent, states: [Todo, In Progress] }   # the loop picks up work here
     blocked: { label: agent-blocked }                        # set when a ticket needs a human ANSWER
