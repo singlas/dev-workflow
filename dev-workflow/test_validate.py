@@ -130,6 +130,33 @@ class ValidateTests(unittest.TestCase):
         errors = _errors_for(cfg)
         self.assertTrue(any("tracker.project must NOT be set when repos" in e for e in errors), errors)
 
+    def test_intake_project_valid_parent_passes(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["repos"] = [{"project": "pt-api", "path": "pt-api"}]
+        cfg["tracker"].pop("project", None)   # a parent must NOT scope to one repo
+        cfg["tracker"]["intake_project"] = "Intake"   # distinct from any repos project
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_intake_project_equal_to_repo_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["repos"] = [{"project": "pt-api", "path": "pt-api"}]
+        cfg["tracker"]["intake_project"] = "pt-api"   # collides with a repos project
+        errors = _errors_for(cfg)
+        self.assertTrue(any("must NOT be one of the repos: projects" in e for e in errors), errors)
+
+    def test_intake_project_without_repos_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["tracker"]["intake_project"] = "Intake"   # no repos: present
+        errors = _errors_for(cfg)
+        self.assertTrue(any("only meaningful in a parent config" in e for e in errors), errors)
+
+    def test_intake_project_empty_fails(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["repos"] = [{"project": "pt-api", "path": "pt-api"}]
+        cfg["tracker"]["intake_project"] = ""
+        errors = _errors_for(cfg)
+        self.assertTrue(any("intake_project must be a non-empty string" in e for e in errors), errors)
+
     def test_off_limits_non_list_fails(self):
         cfg = copy.deepcopy(MINIMAL)
         cfg["guardrails"] = {"off_limits": "*.pem"}
