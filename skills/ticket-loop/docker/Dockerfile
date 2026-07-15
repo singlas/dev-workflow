@@ -60,6 +60,8 @@ COPY skills/ticket-loop/cron-run.sh \
      skills/ticket-loop/run-pass.sh \
      skills/ticket-loop/loop-lock.sh \
      skills/ticket-loop/telegram.py \
+     skills/ticket-loop/usage-parse.py \
+     skills/ticket-loop/usage-rollup.py \
      skills/ticket-loop/orchestrator/orchestrator.sh \
      skills/ticket-loop/orchestrator/orch.py \
      /opt/dev-workflow/bin/

@@ -208,19 +208,127 @@ if [ -n "${DW_PLUGIN_DIR:-}" ]; then
 fi
 
 log "=== $INVOKE $* — start (HEAD $(git rev-parse --short HEAD 2>/dev/null)${MODEL:+, model $MODEL}) ==="
+# --output-format json → a single result object on stdout carrying the human
+# `.result` plus per-pass `usage`. Capture stdout + stderr SEPARATELY: the human
+# summary comes from the parsed `.result`, but detection (session-limit, the
+# background-task guillotine) must read the RAW streams — those signals are
+# harness-level and may be non-JSON or on stderr, especially on the failure path.
+RAW_OUT="$(mktemp "${TMPDIR:-/tmp}/dw-pass-out.XXXXXX")"
+RAW_ERR="$(mktemp "${TMPDIR:-/tmp}/dw-pass-err.XXXXXX")"
+RESULT_FILE="$(mktemp "${TMPDIR:-/tmp}/dw-pass-result.XXXXXX")"
 claude -p "$INVOKE $*" \
+  --output-format json \
   ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
   ${MCP_ARGS[@]+"${MCP_ARGS[@]}"} \
   ${PLUGIN_ARGS[@]+"${PLUGIN_ARGS[@]}"} \
-  --dangerously-skip-permissions >> "$LOG" 2>&1
+  --dangerously-skip-permissions >"$RAW_OUT" 2>"$RAW_ERR"
 rc=$?
-# Regression guard: a headless -p pass must run its build subagents in the
-# FOREGROUND (see the ticket-loop SKILL). If the pass ever backgrounds one, the
-# print harness kills it at the background-wait ceiling and prints this line — a
-# build was silently guillotined mid-flight (0 commits, no PR). Surface it loudly
-# instead of letting the pass look clean; the exit code stays 0 in that case.
-if tail -n 40 "$LOG" | grep -q "Background tasks still running"; then
+
+# Dry-run must stay side-effect-free: parse for the log summary, but record no
+# usage and never page ops.
+DRYRUN=0
+case " $* " in *" --dry-run "*) DRYRUN=1 ;; esac
+
+# Tenant label for usage/alert records: the state-dir name (…/state/<name>),
+# falling back to the work-tree basename for legacy layouts.
+TENANT="$(basename "$STATE_DIR")"
+case "$TENANT" in logs|state|.agent-loop) TENANT="$(basename "$DW_WORK_TREE")" ;; esac
+
+# Parse the pass: write `.result` to the log (human summary preserved), append a
+# usage record, and learn whether this pass hit the session limit. Never fatal —
+# usage tracking must not break a pass.
+USAGE_OUT="$STATE_DIR/usage.jsonl"
+[ "$DRYRUN" = 1 ] && USAGE_OUT="/dev/null"
+PARSER=""
+for _p in "$DW_ROOT/usage-parse.py" "$DW_WORK_TREE/dev-workflow/usage-parse.py"; do
+  [ -f "$_p" ] && { PARSER="$_p"; break; }
+done
+PARSE_LINE=""
+if [ -n "$PARSER" ] && command -v python3 >/dev/null 2>&1; then
+  PARSE_LINE="$(python3 "$PARSER" --stdout "$RAW_OUT" --stderr "$RAW_ERR" \
+      --tenant "$TENANT" --rc "$rc" --result-out "$RESULT_FILE" \
+      --usage-out "$USAGE_OUT" 2>>"$LOG" || true)"
+  cat "$RESULT_FILE" >> "$LOG"
+else
+  cat "$RAW_OUT" >> "$LOG"   # no parser/python — old behaviour, raw output to log
+  log "WARN: usage-parse.py or python3 missing — usage not recorded"
+fi
+
+LIMIT=0; RESET=""
+case "$PARSE_LINE" in *limit=1*) LIMIT=1 ;; esac
+RESET="$(printf '%s' "$PARSE_LINE" | sed -n 's/.*reset=\([^	]*\).*/\1/p')"
+
+# Regression guard (reads the RAW capture, not the log): a headless -p pass must
+# run its build subagents in the FOREGROUND (see the ticket-loop SKILL). If the
+# pass backgrounds one, the print harness kills it at the ceiling and prints this
+# line — a build was silently guillotined mid-flight (0 commits, no PR).
+if grep -q "Background tasks still running" "$RAW_OUT" "$RAW_ERR" 2>/dev/null; then
   log "WARN: pass terminated background task(s) at the -p ceiling — a build was likely killed mid-flight (SKILL rule: builds must run foreground, run_in_background:false)."
 fi
+
+# ── escalation → ops channel (single-mode only) ──
+# The orchestrator owns escalation for its tenants and sets DW_ORCHESTRATED=1;
+# only single-mode (flag unset) pages from here. Ops creds are sourced ONE-SHOT
+# from DW_OPS_ENV_FILE for the send only — never exported into the claude env.
+notify_ops() {  # $1 message
+  local opsenv="${DW_OPS_ENV_FILE:-/home/agent/orch.env}" tg=""
+  local _t
+  for _t in "$DW_ROOT/telegram.py" "$DW_WORK_TREE/dev-workflow/telegram.py"; do
+    [ -f "$_t" ] && { tg="$_t"; break; }
+  done
+  [ -n "$tg" ] && [ -f "$opsenv" ] || { log "note: ops alert skipped (no telegram.py or $opsenv)"; return 0; }
+  ( set -a; . "$opsenv"; set +a
+    [ -n "${ORCH_TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${ORCH_TELEGRAM_CHAT_ID:-}" ] || exit 0
+    TELEGRAM_BOT_TOKEN="$ORCH_TELEGRAM_BOT_TOKEN" \
+    AGENT_TELEGRAM_CHAT_ID="$ORCH_TELEGRAM_CHAT_ID" \
+    TICKET_LOOP_STATE_DIR="$STATE_DIR" \
+      python3 "$tg" send "$1" >/dev/null 2>&1 ) \
+    || log "WARN: ops alert failed to send"
+}
+
+ALERT_STATE="$STATE_DIR/alert.json"
+if [ "$DRYRUN" = 0 ] && [ -z "${DW_ORCHESTRATED:-}" ]; then
+  KIND="" FINGERPRINT="" MSG=""
+  if [ "$LIMIT" = 1 ]; then
+    KIND="limit"; FINGERPRINT="limit:${RESET:-?}"
+    MSG="⚠️ ${TENANT}: Claude session limit — passes paused${RESET:+, ${RESET}}"
+  elif [ "$rc" -ne 0 ] && [ ! -f "$STATE_DIR/outcome.json" ]; then
+    KIND="failure"; FINGERPRINT="fail:rc${rc}"
+    MSG="$(printf '🚨 %s: pass failed (exit %s, no outcome). Last log:\n%s' \
+           "$TENANT" "$rc" "$(tail -n 6 "$LOG" 2>/dev/null)")"
+  fi
+  if [ -n "$KIND" ]; then
+    # Dedup latch {kind, fingerprint}: suppress a repeat of the same incident;
+    # a healthy pass (below) clears it so the next incident re-pages.
+    SEND=1
+    if command -v python3 >/dev/null 2>&1; then
+      SEND="$(python3 - "$ALERT_STATE" "$KIND" "$FINGERPRINT" <<'PY'
+import json, sys
+path, kind, fp = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    prev = json.load(open(path))
+except Exception:
+    prev = {}
+send = not (prev.get("kind") == kind and prev.get("fingerprint") == fp)
+if send:
+    try:
+        json.dump({"kind": kind, "fingerprint": fp}, open(path, "w"))
+    except OSError:
+        pass
+print("1" if send else "0")
+PY
+)"
+    fi
+    if [ "$SEND" = 1 ]; then
+      notify_ops "$MSG"; log "ops alert sent: $KIND ($FINGERPRINT)"
+    else
+      log "ops alert suppressed (dedup): $KIND ($FINGERPRINT)"
+    fi
+  else
+    rm -f "$ALERT_STATE" 2>/dev/null || true   # healthy pass — clear stale latch
+  fi
+fi
+
+rm -f "$RAW_OUT" "$RAW_ERR" "$RESULT_FILE" 2>/dev/null || true
 log "=== $INVOKE $* — done (exit $rc) ==="
 exit "$rc"

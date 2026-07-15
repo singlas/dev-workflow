@@ -56,6 +56,7 @@ RUN_PASS="${ORCH_RUN_PASS:-$(find_sibling run-pass.sh || true)}"
 TELEGRAM="$(find_sibling telegram.py || true)"
 QUEUE_COUNT="$(find_sibling queue-count.py || true)"
 LOCK_SH="$(find_sibling loop-lock.sh || true)"
+ROLLUP_PY="$(find_sibling usage-rollup.py || true)"
 
 ROSTER="${ORCH_ROSTER:-/home/agent/roster.yml}"
 ORCH_STATE_DIR="${ORCH_STATE_DIR:-$(dirname "$ROSTER")/orch}"
@@ -95,6 +96,34 @@ ops_alert() {
       python3 "$TELEGRAM" send "🚨 orchestrator: $*" >/dev/null 2>&1 \
       || log "WARN: ops alert failed to send"
   fi
+}
+
+# Send a message to the ops channel VERBATIM (no 🚨 prefix) — for the daily
+# usage rollup, which is informational, not an alert.
+ops_send_raw() {  # $1 message
+  [ -n "${ORCH_TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${ORCH_TELEGRAM_CHAT_ID:-}" ] \
+    && [ -n "$TELEGRAM" ] || return 0
+  TELEGRAM_BOT_TOKEN="$ORCH_TELEGRAM_BOT_TOKEN" \
+  AGENT_TELEGRAM_CHAT_ID="$ORCH_TELEGRAM_CHAT_ID" \
+  TICKET_LOOP_STATE_DIR="$ORCH_STATE_DIR" \
+    python3 "$TELEGRAM" send "$1" >/dev/null 2>&1 || log "WARN: rollup send failed"
+}
+
+# Once-daily per-tenant usage rollup to the ops channel. Pure aggregation over
+# every tenant's usage.jsonl under the state root (scans ALL state dirs, not just
+# roster-enabled projects, so single-mode/paused tenants are included) — no model
+# call, no subscription tokens. Timestamp-gated in ORCH_STATE_DIR.
+maybe_rollup() {
+  [ -n "$ROLLUP_PY" ] || return 0
+  local today last="" root stamp summary
+  today="$(date +%Y-%m-%d)"
+  stamp="$ORCH_STATE_DIR/last-rollup"
+  [ -f "$stamp" ] && last="$(cat "$stamp" 2>/dev/null)"
+  [ "$last" = "$today" ] && return 0
+  root="${ORCH_STATE_ROOT:-$(dirname "$ROSTER")/state}"
+  summary="$(python3 "$ROLLUP_PY" --state-root "$root" --date "$today" 2>/dev/null || true)"
+  echo "$today" > "$stamp"
+  [ -n "$summary" ] && ops_send_raw "$summary"
 }
 
 # Call INSIDE a subshell after sourcing a project's env file: projects that
@@ -194,6 +223,8 @@ while :; do
   fi
   [ "$DRAIN" = 1 ] && { log "drained — exiting"; exit 0; }
 
+  maybe_rollup   # once-daily usage summary to ops (no-op the rest of the day)
+
   RUN_NOW_ARGS=()
   if [ -f "$RUN_NOW_FILE" ]; then
     RUN_NOW_ARGS=(--run-now "$(head -1 "$RUN_NOW_FILE" 2>/dev/null | tr -d '[:space:]')")
@@ -279,9 +310,12 @@ while :; do
 
   # Minimal, project-scoped child env (spec §5): the pass sources its own
   # agent.env via DW_ENV_FILE; nothing from any other project leaks in.
+  # DW_ORCHESTRATED=1 tells cron-run.sh that escalation is the orchestrator's job
+  # (its existing threshold path) — so the pass does NOT page ops itself. Only
+  # single-mode timers (flag unset) self-page. It carries no secret.
   ENV_ARGS=( HOME="$HOME" PATH="$PATH" LANG="${LANG:-C.UTF-8}"
              DW_ENV_FILE="$ENV_FILE" DW_WORK_TREE="$WORK_TREE"
-             TICKET_LOOP_STATE_DIR="$STATE_DIR" )
+             TICKET_LOOP_STATE_DIR="$STATE_DIR" DW_ORCHESTRATED=1 )
   [ -n "${MODEL:-}" ]                  && ENV_ARGS+=( TICKET_LOOP_MODEL="$MODEL" )
   [ -n "${PROJECT_TZ:-}" ]             && ENV_ARGS+=( TICKET_LOOP_TZ="$PROJECT_TZ" )
   # Per-entry mode (roster overrides the repo's own agent.*): which skill the pass
