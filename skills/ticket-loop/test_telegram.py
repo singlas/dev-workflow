@@ -30,6 +30,47 @@ UTC = datetime.timezone.utc
 NOW = datetime.datetime(2026, 7, 11, 12, 0, 0, tzinfo=UTC)
 
 
+class TestFindRepoRoot(unittest.TestCase):
+    """cwd (the repo you're operating on) must win over the script's own tree —
+    the bridge lives inside the dev-workflow checkout (which has .git), so a
+    script-first walk would resolve dev-workflow and read ITS .env instead of the
+    target repo's. Regression guard for the pubx-hil/.env bridge bug."""
+
+    def test_cwd_wins_over_script_location(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp).resolve() / "target-repo"
+            (work / ".git").mkdir(parents=True)   # a git work tree
+            cwd0 = os.getcwd()
+            try:
+                os.chdir(work)
+                # __file__ lives inside the dev-workflow checkout (its own .git),
+                # yet cwd-first must return the work tree we're standing in.
+                self.assertEqual(telegram.find_repo_root(), work)
+            finally:
+                os.chdir(cwd0)
+
+    def test_target_env_wins_not_framework_env(self):
+        # The concrete bug: creds in the target repo's .env must load, and the
+        # framework checkout's absent .env must NOT shadow them.
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp).resolve() / "pubx-hil"
+            (work / ".git").mkdir(parents=True)
+            (work / ".env").write_text("AGENT_TELEGRAM_CHAT_ID=-100999\n")
+            cwd0 = os.getcwd()
+            saved_root, saved_chat = telegram.REPO_ROOT, os.environ.pop("AGENT_TELEGRAM_CHAT_ID", None)
+            try:
+                os.chdir(work)
+                telegram.REPO_ROOT = telegram.find_repo_root()   # recompute for the new cwd
+                telegram.load_env()
+                self.assertEqual(os.environ.get("AGENT_TELEGRAM_CHAT_ID"), "-100999")
+            finally:
+                os.chdir(cwd0)
+                telegram.REPO_ROOT = saved_root
+                os.environ.pop("AGENT_TELEGRAM_CHAT_ID", None)
+                if saved_chat is not None:
+                    os.environ["AGENT_TELEGRAM_CHAT_ID"] = saved_chat
+
+
 class TestQTicket(unittest.TestCase):
     def test_rich_entry(self):
         v = {"ticket": "ABC-123", "text": "hi", "asked_at": "2026-07-11T10:00:00Z"}
