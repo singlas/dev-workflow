@@ -65,8 +65,15 @@ from pathlib import Path
 
 
 def find_repo_root() -> Path:
-    """Walk up from the script (then cwd) to the nearest directory containing .git."""
-    for base in (Path(__file__).resolve().parent, Path.cwd()):
+    """Walk up from cwd (then the script location) to the nearest directory
+    containing .git. cwd is tried FIRST because it is the repo you're operating
+    on — the work tree you invoke the bridge from. The script itself is baked
+    into the framework/plugin, whose OWN tree may be a git checkout (a plugin or
+    dev checkout of dev-workflow); resolving from there would read that repo's
+    .env instead of the target repo's. (No effect on the box: run-pass sets
+    TICKET_LOOP_STATE_DIR and the creds live in the env, so REPO_ROOT is unused
+    there — this only fixes the repo-root .env path in interactive/local runs.)"""
+    for base in (Path.cwd(), Path(__file__).resolve().parent):
         for candidate in (base, *base.parents):
             if (candidate / ".git").exists():
                 return candidate
