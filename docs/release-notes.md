@@ -1,5 +1,20 @@
 # Release notes
 
+## v0.6.1
+
+**Ops-channel accuracy: real usage + limit≠auth.** Two fixes surfaced during a
+shared-token-pool exhaustion across a multi-tenant orchestrator box. (1) The daily
+usage digest read "in 170" because it summed only `input_tokens`/`output_tokens`
+and ignored `cache_read`/`cache_creation` — the bulk of a cached agent's input.
+It now reports the real input total including cache (e.g. "in 4.4M (cache 4.4M)")
+with M-scale formatting. (2) When the shared token pool ran out, every roster
+project errored at once and the orchestrator escalated "shared-auth failure
+(expired token)" — an alarming, wrong diagnosis that sent people chasing a
+credential problem. A session-limit hit and an expired token both error everyone,
+but a limit-hit leaves `limit=true` in the tenant's latest `usage.jsonl` while an
+auth failure writes no usage envelope; `orch.py` now discriminates and sends
+"shared SESSION LIMIT hit … auto-resume once the pool resets" instead.
+
 ## v0.6.0
 
 **Passive intake parking-lot for the parent loop.** A new optional
