@@ -5,7 +5,9 @@ description: >-
   bot + group, one parent roster entry that routes every message and ticket to
   the right child repo, then round-robins its child repos — each pass babysits
   one child's PRs and builds its next ticket via a subagent in that child's
-  clone. Selected by config
+  clone. Also answers ad-hoc `question:` messages about a child repo's codebase
+  (routed by tag or a which-repo reply) with a read-only subagent, creating no
+  ticket. Selected by config
   (`agent.skill: ticket-loop-parent` in the parent repo's dev-workflow.yml),
   never by hand in a single-repo setup — those keep using /ticket-loop.
 ---
@@ -228,9 +230,12 @@ unconditionally.) The digest is READ-ONLY and aggregates across every
 ### 1. Drain Telegram
 
 `python3 telegram.py poll --timeout 0` — drain every human message. **Classify
-before mutating anything**, exactly as the single-repo loop's step 1 (answer /
-approval / decline / creation request / green-light / flag / questions /
-chatter, screenshots as evidence). But here classification is not enough:
+before mutating anything**, exactly as the single-repo loop's step 1 (codebase
+question / answer / approval / decline / creation request / green-light / flag /
+questions / chatter, screenshots as evidence). A **codebase question** (first line
+`question:` + a body, checked first, independent of the `ticket` field) is
+ephemeral — it creates no ticket; but like everything else here it still needs a
+repo, so it routes in step 2. But here classification is not enough:
 **nothing mutates the tracker until step 2 has resolved the message to a
 repo.** Re-drain after every `telegram.py send`, same as the single-repo loop
 — draining is continuous, not just step 1.
@@ -262,10 +267,13 @@ message identifies itself:
 - **Reply to a pre-ticket "which project?" clarifier** — the poll line has
   `ticket: null` and a **`context`** (the original report you stashed when you
   asked). The human's reply text names the project (a `repos:` name or a
-  `[tag]`): resolve it, then `create_ticket` FROM THE `context` in that project
-  and continue per the fresh-report rule below. If the reply names no known
-  project, re-ask once. This is how a disambiguation completes in one reply
-  instead of a resend.
+  `[tag]`): resolve it, then dispatch on the `context` prefix — **if it starts
+  `question:`**, this was an untagged codebase question, so **answer** it in the
+  resolved child (read-only subagent, per the *Codebase question* routing below)
+  and `create_ticket` **nothing**; **otherwise** `create_ticket` FROM THE `context`
+  in that project and continue per the fresh-report rule below. If the reply names
+  no known project, re-ask once. This is how a disambiguation completes in one
+  reply instead of a resend.
 - **`take ABC-123` / green-light / `flag ABC-123` — an existing ticket** →
   `get_ticket`, then dispatch on its project field:
   - **Project maps to a `repos:` entry** → apply the single-repo loop's handling
@@ -331,6 +339,25 @@ message identifies itself:
 - **Scout proposals** you sent already carry their project (step 8 scouts per
   child project), so a `take ABC-<n>` approval routes cleanly by the ticket's
   project like any green-light.
+- **Codebase question** (`question:` + a body) — ephemeral, creates **no ticket**,
+  but still needs a repo to read from. Two forms, by how it names the repo:
+  - **Tagged** — `question: [pt-api] how does pricing calc?` → resolve `[pt-api]`
+    to a `repos:` entry and answer it NOW, per *Answering a codebase question* in
+    the single-repo loop's step 1, with **cwd = that child clone**. Same read-only
+    guardrails; the subagent never touches parent state.
+  - **Untagged** → reuse the `--context` which-repo round-trip (same machinery as a
+    fresh untagged `bug:`): `telegram.py send --context 'question: <the verbatim
+    question>' "❓ Which repo — pt-api / pt-web / …?"` (list from `repos:`). The
+    human's reply returns with `ticket: null` + that `context`; because the context
+    is prefixed `question:`, resolve the named repo and **answer** it (read-only
+    subagent in that child) instead of `create_ticket`. Preserves the question and
+    any image, completes in one reply, and creates no ticket. If the reply names no
+    known repo, re-ask once.
+  - **Images:** a `question:`'s `media_path` lives in the **parent** state dir, and
+    a child subagent must not reach parent state (see *State isolation*). So the
+    orchestrator (which legitimately reads parent state) reads the image itself and
+    folds a short text description into the subagent prompt — the child subagent
+    stays code-only.
 - Anything else with no ticket and no recognized prefix is group chatter —
   ignore it.
 

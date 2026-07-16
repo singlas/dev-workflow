@@ -213,6 +213,7 @@ and decommission ONLY that project's individual timer.
 |---|---|
 | `bug: <what's broken>` | Linear issue created (labeled Bug, reporter credited), labeled `agent`, and the loop **investigates it** — no go/skip gate |
 | `feature: …` / `ticket: …` | Same — created, labeled `agent`, then scoped/planned before any build |
+| `question: <about the code>` | A read-only subagent reads the code and replies — **no ticket, no board side effect** (distinct from the bare `open questions` command) |
 | `take ABC-123` | Green-light an *existing* backlog ticket into the queue |
 | `go` (reply to a 🙋 scout proposal) | Approves a ticket the loop proposed when the queue ran empty |
 | Reply to a ❓ question, or `ABC-123 <answer>` | Answer recorded on the ticket; it unblocks |
