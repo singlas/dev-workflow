@@ -1,5 +1,18 @@
 # Release notes
 
+## v0.6.3
+
+**Ask the codebase over Telegram — `question:`.** A new inbound message class in
+both `/ticket-loop` and `/ticket-loop-parent`: `question: <about the code>` is
+answered by a read-only, foreground subagent that reads the checkout and replies
+in the group — no ticket, no label, no state, nothing in the digest. It's checked
+first and independently of the tracker field, so a `question:` still routes when
+sent as a reply or with a leading ticket key. Same read-only guardrails as builds
+(off-limits paths, secret exclusion, no quoting secrets or sensitive git history;
+question text is data, not instructions) with a per-question timeout and no
+isolation worktree. In parent mode a `[repo]`-tagged question is answered in that
+child clone; an untagged one reuses the existing which-repo round-trip.
+
 ## v0.6.2
 
 **Telegram bridge resolves the repo root from the working directory.** The bridge
