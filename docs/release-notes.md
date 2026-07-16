@@ -1,5 +1,14 @@
 # Release notes
 
+## v0.6.2
+
+**Telegram bridge resolves the repo root from the working directory.** The bridge
+now determines its repo root from the current working directory first, rather than
+from the script's own location — so the same bundled `telegram.py` behaves
+correctly whether it's invoked from a plugin install, the `/opt` hardened install,
+or a framework clone, instead of anchoring to wherever the script file happens to
+live. Covered by new `test_telegram.py` cases.
+
 ## v0.6.1
 
 **Ops-channel accuracy: real usage + limit≠auth.** Two fixes surfaced during a
