@@ -19,7 +19,11 @@ import json
 import os
 import sys
 
-TOKEN_FIELDS = ("input_tokens", "output_tokens")
+# All four token fields matter: for a cached agent, `input_tokens` is only the
+# tiny non-cached delta — the real volume is `cache_read` (context re-read every
+# turn). Summing just input+output made the digest read "in 170" while millions
+# of cache-read tokens were invisible. Track all four; report a real input total.
+TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read", "cache_creation")
 
 
 def parse_records(text):
@@ -49,14 +53,20 @@ def aggregate(tenants, date):
     """tenants: {name: [record, ...]} -> {'per': {name: stats}, 'total': stats}.
     Only records whose `ts` starts with `date` count. stats keys: passes,
     input_tokens, output_tokens, limits."""
+    def _blank():
+        d = {"passes": 0, "limits": 0}
+        for f in TOKEN_FIELDS:
+            d[f] = None
+        return d
+
     per = {}
-    total = {"passes": 0, "input_tokens": None, "output_tokens": None, "limits": 0}
+    total = _blank()
     for name in sorted(tenants):
         recs = [r for r in tenants[name] if str(r.get("ts", "")).startswith(date)]
         if not recs:
             continue
-        s = {"passes": len(recs), "input_tokens": None,
-             "output_tokens": None, "limits": 0}
+        s = _blank()
+        s["passes"] = len(recs)
         for r in recs:
             for f in TOKEN_FIELDS:
                 s[f] = _add(s[f], r.get(f))
@@ -64,25 +74,38 @@ def aggregate(tenants, date):
                 s["limits"] += 1
         per[name] = s
         total["passes"] += s["passes"]
-        total["input_tokens"] = _add(total["input_tokens"], s["input_tokens"])
-        total["output_tokens"] = _add(total["output_tokens"], s["output_tokens"])
         total["limits"] += s["limits"]
+        for f in TOKEN_FIELDS:
+            total[f] = _add(total[f], s[f])
     return {"per": per, "total": total}
 
 
 def _hk(n):
     if n is None:
         return "?"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
     if n >= 1000:
         return f"{n / 1000:.0f}k"
     return str(n)
 
 
+def _input_total(s):
+    """Real input volume = non-cached input + cache reads + cache creation.
+    None only when every contributing field is missing."""
+    parts = [s.get(f) for f in ("input_tokens", "cache_read", "cache_creation")]
+    if all(p is None for p in parts):
+        return None
+    return sum(p or 0 for p in parts)
+
+
 def _line(name, s):
     flag = f" · {s['limits']} limit-hit{'s' if s['limits'] != 1 else ''}"
     flag += " ⚠️" if s["limits"] else ""
+    cached = _add(s.get("cache_read"), s.get("cache_creation"))
+    cache_note = f" (cache {_hk(cached)})" if cached else ""
     return (f"{name}: {s['passes']} pass{'es' if s['passes'] != 1 else ''} · "
-            f"in {_hk(s['input_tokens'])} / out {_hk(s['output_tokens'])}{flag}")
+            f"in {_hk(_input_total(s))}{cache_note} / out {_hk(s['output_tokens'])}{flag}")
 
 
 def render(agg, date):

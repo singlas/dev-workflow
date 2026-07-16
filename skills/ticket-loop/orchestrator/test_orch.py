@@ -682,6 +682,41 @@ class TestSharedAuthEscalation(unittest.TestCase):
             st, out = self.record(roster, state, "beta", "productive")
             self.assertFalse(st["all_error_alerted"])
 
+    def _write_usage_limit(self, tmp, name, limit, reset=""):
+        sd = Path(tmp) / f"state-{name}"
+        sd.mkdir(parents=True, exist_ok=True)
+        rec = {"ts": "2026-07-11T12:00:00", "tenant": name, "rc": 1,
+               "limit": limit}
+        if reset:
+            rec["reset"] = reset
+        (sd / "usage.jsonl").write_text(json.dumps(rec) + "\n")
+
+    def test_all_error_says_session_limit_when_usage_shows_limit(self):
+        """A shared session-limit exhaustion must NOT read as an auth failure —
+        it errors every project at once but is benign + self-resolving."""
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = self.make_two_project_roster(tmp)
+            state = Path(tmp) / "orch-state.json"
+            self._write_usage_limit(tmp, "alpha", True, "resets 2pm")
+            self._write_usage_limit(tmp, "beta", True)
+            self.record(roster, state, "alpha", "error")
+            _st, out = self.record(roster, state, "beta", "error")
+            self.assertIn("SESSION LIMIT", out["ESCALATE_OPS"])
+            self.assertIn("NOT an auth", out["ESCALATE_OPS"])
+            self.assertIn("resets 2pm", out["ESCALATE_OPS"])
+            self.assertNotIn("expired CLAUDE_CODE_OAUTH_TOKEN",
+                             out["ESCALATE_OPS"])
+
+    def test_all_error_says_auth_when_no_usage_limit(self):
+        """No limit=true in any usage.jsonl -> a genuine auth failure wording."""
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = self.make_two_project_roster(tmp)
+            state = Path(tmp) / "orch-state.json"
+            self.record(roster, state, "alpha", "error")
+            _st, out = self.record(roster, state, "beta", "error")
+            self.assertIn("expired CLAUDE_CODE_OAUTH_TOKEN", out["ESCALATE_OPS"])
+            self.assertNotIn("SESSION LIMIT", out["ESCALATE_OPS"])
+
 
 class TestStartup(unittest.TestCase):
     def test_crash_recovery_and_lock_clear(self):

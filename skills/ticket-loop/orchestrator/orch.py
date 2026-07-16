@@ -566,6 +566,30 @@ def apply_outcome(ps, cls, cfg, now, cadence="adaptive", interval_s=None):
     return delay, esc
 
 
+def _latest_usage_limit(state_dir):
+    """(limit_hit, reset_str) from the LAST record in <state_dir>/usage.jsonl.
+    Tells a shared session-LIMIT exhaustion apart from an auth failure: a
+    limit-hit pass records limit=true (usage-parse detects the limit text); an
+    expired-token auth failure produces no usage envelope, so limit stays false.
+    Returns (False, '') on any missing / unreadable / limitless file."""
+    if not state_dir:
+        return False, ""
+    try:
+        path = Path(state_dir) / "usage.jsonl"
+        last = ""
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    last = line
+        if last:
+            rec = json.loads(last)
+            if isinstance(rec, dict) and rec.get("limit"):
+                return True, str(rec.get("reset") or "")
+    except (OSError, ValueError, TypeError):
+        pass
+    return False, ""
+
+
 def cmd_record(args):
     roster = load_roster(args.roster)
     st = load_state(args.state)
@@ -590,9 +614,29 @@ def cmd_record(args):
                all(st["projects"][n]["error_streak"] >= 1 for n in names))
     if all_err and args.outcome in ("error", "crash") and not st.get("all_error_alerted"):
         st["all_error_alerted"] = True
-        esc.append(("ops", "🚨 EVERY roster project is erroring — shared-auth "
-                           "failure likely (expired CLAUDE_CODE_OAUTH_TOKEN in "
-                           "the shared ~/.claude?)"))
+        # The roster shares one token pool, so BOTH a session-limit exhaustion
+        # (credits ran out) AND an expired-token auth failure error every project
+        # at once — but they need different responses. A limit-hit is benign and
+        # self-resolving (wait for the reset); an auth failure needs a new token.
+        # Discriminate on the authoritative signal: a limit-hit leaves limit=true
+        # in the tenant's latest usage.jsonl; auth failure writes no usage.
+        sd_by_name = {p["name"]: p.get("state_dir") for p in roster["projects"]}
+        reset_hint, limit_seen = "", False
+        for n in names:
+            hit, reset = _latest_usage_limit(sd_by_name.get(n))
+            if hit:
+                limit_seen = True
+                reset_hint = reset_hint or reset
+        if limit_seen:
+            tail = f" — {reset_hint}" if reset_hint else ""
+            esc.append(("ops", "🚦 EVERY roster project is erroring — shared Claude "
+                               "SESSION LIMIT hit (credits exhausted), NOT an auth "
+                               "problem; passes auto-resume once the pool "
+                               f"resets{tail}."))
+        else:
+            esc.append(("ops", "🚨 EVERY roster project is erroring — shared-auth "
+                               "failure likely (expired CLAUDE_CODE_OAUTH_TOKEN in "
+                               "the shared ~/.claude?)"))
     if not all_err:
         st["all_error_alerted"] = False
     save_state(args.state, st)

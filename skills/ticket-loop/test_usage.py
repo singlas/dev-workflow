@@ -130,6 +130,20 @@ class Rollup(unittest.TestCase):
             self.assertIn("paytunes", tenants)
             self.assertEqual(len(tenants["paytunes"]), 1)
 
+    def test_cache_tokens_counted_in_input_total(self):
+        # The "in 170" bug: a cached agent has tiny input_tokens but millions of
+        # cache_read tokens; the digest must report the REAL input, not the delta.
+        recs = [{"ts": "2026-07-15T01:00:00", "tenant": "rasa",
+                 "input_tokens": 170, "output_tokens": 58000,
+                 "cache_read": 4_000_000, "cache_creation": 200_000}]
+        agg = ur.aggregate({"rasa": recs}, "2026-07-15")
+        s = agg["per"]["rasa"]
+        self.assertEqual(ur._input_total(s), 170 + 4_000_000 + 200_000)
+        line = ur._line("rasa", s)
+        self.assertIn("in 4.2M", line)      # real input total, not "in 170"
+        self.assertIn("cache 4.2M", line)   # cache made visible
+        self.assertNotIn("in 170", line)
+
 
 if __name__ == "__main__":
     unittest.main()
