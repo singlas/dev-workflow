@@ -32,7 +32,8 @@ ENV DISABLE_AUTOUPDATER=1 \
 # stacks' test suites reach a DB. build-essential + libpq-dev give gcc + pg_config
 # + libpq headers so `uv sync` can compile source-only C-extension wheels (e.g.
 # psycopg2==2.x, which ships no manylinux wheel) — without them a Django test gate
-# can't even bootstrap its venv. Trim or extend (a JS toolchain, wkhtmltopdf, …)
+# can't even bootstrap its venv. python3-dev supplies Python.h, needed to compile
+# any C extension against the system python. Trim or extend (a JS toolchain, wkhtmltopdf, …)
 # to match YOUR repo's test dependencies.
 RUN set -eux; \
     if [ -z "$CLAUDE_CODE_VERSION" ]; then \
@@ -41,7 +42,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       git curl ca-certificates gnupg jq python3 python3-yaml tzdata postgresql-client \
-      build-essential libpq-dev; \
+      build-essential libpq-dev python3-dev; \
     # GitHub CLI from its own apt repo (Debian doesn't package it)
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
