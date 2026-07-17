@@ -29,15 +29,19 @@ ENV DISABLE_AUTOUPDATER=1 \
 # /usr/share/zoneinfo so the runner's `export TZ=<schedule.tz>` is effective —
 # without it dates fall back to UTC and the daily-digest day gate misfires), and
 # uv (Python deps for the quality gate). postgresql-client is here because many
-# stacks' test suites reach a DB — drop it, or extend this list (build-essential,
-# a JS toolchain, …), to match YOUR repo's test dependencies.
+# stacks' test suites reach a DB. build-essential + libpq-dev give gcc + pg_config
+# + libpq headers so `uv sync` can compile source-only C-extension wheels (e.g.
+# psycopg2==2.x, which ships no manylinux wheel) — without them a Django test gate
+# can't even bootstrap its venv. Trim or extend (a JS toolchain, wkhtmltopdf, …)
+# to match YOUR repo's test dependencies.
 RUN set -eux; \
     if [ -z "$CLAUDE_CODE_VERSION" ]; then \
       echo "ERROR: build-arg CLAUDE_CODE_VERSION is required (pin the claude version)"; exit 1; \
     fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-      git curl ca-certificates gnupg jq python3 python3-yaml tzdata postgresql-client; \
+      git curl ca-certificates gnupg jq python3 python3-yaml tzdata postgresql-client \
+      build-essential libpq-dev; \
     # GitHub CLI from its own apt repo (Debian doesn't package it)
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
