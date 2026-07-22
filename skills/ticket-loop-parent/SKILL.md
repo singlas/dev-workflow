@@ -358,6 +358,33 @@ message identifies itself:
     orchestrator (which legitimately reads parent state) reads the image itself and
     folds a short text description into the subagent prompt — the child subagent
     stays code-only.
+- **Release request** (`release` or `release <child>`, `ticket: null`) — triggers
+  the base→prod promotion PR for ONE child. **Handled immediately in this
+  message-drain phase, never deferred to the child's round-robin turn** (cross-repo,
+  exactly like `question:`). Creates no ticket, applies no label. Group membership
+  is the trust boundary — no allowlist, no confirmation round-trip. Two forms:
+  - **`release <child>`** — resolve `<child>` to a `repos:` entry; if it names no
+    known repo, reply `🤷 unknown repo '<child>' — I manage: pt-api / pt-web / …`
+    (list from `repos:`) and stop. Otherwise run the release in that child's clone.
+  - **Bare `release`** — the repo is ambiguous, so ask once with the child list, the
+    same `--context` which-repo round-trip as an untagged `question:`:
+    `telegram.py send --context 'release:' "❓ Which repo should I release —
+    pt-api / pt-web / …?"`. The human's reply returns `ticket: null` + that
+    `context`; because it is prefixed `release:`, resolve the named child and run
+    the release there (re-ask once if the reply names no known repo).
+  - **Execution is the single-repo loop's *Cutting a release*, verbatim** (ack, the
+    five-key config gate → `🛑 <child> isn't release-configured (missing <keys>)`,
+    ONE foreground awaited general-purpose subagent with **NO isolation worktree**,
+    the full `/release` contract, the 🚀 success reply, the failure hygiene) — but
+    **in the resolved child clone**, which MUST carry the `.dw-agent-clone` marker
+    before the subagent runs (guardrail 1 — no marker, no release). First land the
+    child clean on its base branch via step 6a's reset primitive (marker check,
+    `git -C <child> fetch origin`, `reset --hard origin/<child base_branch>`, clean)
+    — safe because a pushed version bump lives on `origin/<base>` and the flow's
+    resume detection re-reads it. The subagent reads THAT child's `dev-workflow.yml`
+    for `repo.base_branch` / `repo.prod_branch` / `deploy` / `version` and runs
+    every command inside the child clone. The parent — never the subagent — sends
+    every Telegram reply.
 - Anything else with no ticket and no recognized prefix is group chatter —
   ignore it.
 
@@ -420,6 +447,14 @@ The three checks are the single-repo loop's step 2, in its order:
   merges `origin/<base_branch>` into the PR branch (never rebase — a rebase
   needs a force-push, which is off-limits), tests, push. Unsafe to resolve →
   `⚠️` to the group, skip-list, leave the PR.
+- **d. Release PRs → announce on merge** (this child only): the single-repo loop's
+  step-2d, run from this child's clone against ITS `repo.prod_branch`. A release PR
+  is `--base <child prod_branch>` AND title `Release v* [agent]` — never inferred.
+  Open + red CI → `⚠️ <child> release PR #<num> — CI red`. Merged → `telegram.py
+  send "🎉 <child> v<X.Y.Z> live"` then a `📣 announced` comment on the PR, skipping
+  any merged release PR already carrying that marker (state lives on GitHub; the
+  optional merge-hook Action posts the same marker). Releases are repo-level, so
+  this rides the child's round-robin turn like the rest of the babysit.
 
 Idempotence rules from the single-repo loop apply per PR (don't churn a PR
 whose last push post-dates every comment with green/pending checks;
@@ -535,8 +570,9 @@ date/flag-gated in the PARENT's `state.json` (`last_scout`, `idle_pinged`).
 
 **Digest content** (composed at step 0; specified here for reference) — ONE
 message to the ONE group, the single-repo loop's sections and shared rendering
-contract unchanged (🟢 Merged / 👀 Awaiting review / ⏳ Blocked on answers /
-🔗 Blocked on dependencies / 📋 Queued; Monday hygiene sections), with two
+contract unchanged (🟢 Merged / 👀 Awaiting review / 🚀 Pending release /
+⏳ Blocked on answers / 🔗 Blocked on dependencies / 📋 Queued; Monday hygiene
+sections), with two
 parent twists: PR-derived sections aggregate across **every** `repos:` entry
 (READ-ONLY — the digest may look at all children; mutations like closing a
 merged ticket still happen only on that repo's round-robin turn, step 4a), and
