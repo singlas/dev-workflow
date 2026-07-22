@@ -156,6 +156,31 @@ else
   fi
 fi
 
+# ── agent-tier worktree/branch sweep (before the pre-pass hook) ──
+# Reclaim the loop's dead build worktrees + merged branches (the agent-tier twin of
+# the laptop `/worktree --gc`). Always-on like the reset above — no config key;
+# TICKET_LOOP_NO_SWEEP=1 disables it for debugging. In manager/parent mode also
+# sweep each immediate child clone carrying the .dw-agent-clone marker (the
+# parent-mode guard — never a bare "has .git" heuristic). Runs BEFORE hooks.pre_pass;
+# failures are logged WARN and never abort the pass.
+SWEEP="$DW_ROOT/sweep-worktrees.sh"
+if [ "${TICKET_LOOP_NO_SWEEP:-}" = "1" ]; then
+  log "sweep: skipped (TICKET_LOOP_NO_SWEEP=1)"
+elif [ ! -f "$SWEEP" ]; then
+  log "note: sweep-worktrees.sh not found at $SWEEP — skipping sweep"
+else
+  SWEEP_DIRS=("$DW_WORK_TREE")
+  if [ "$MANAGER" = 1 ]; then
+    for _child in "$DW_WORK_TREE"/*/; do
+      [ -f "${_child}.dw-agent-clone" ] && SWEEP_DIRS+=("${_child%/}")
+    done
+  fi
+  log "sweep: ${SWEEP_DIRS[*]}"
+  if ! DW_ROOT="$DW_ROOT" bash "$SWEEP" "${SWEEP_DIRS[@]}" >>"$LOG" 2>&1; then
+    log "WARN: sweep-worktrees.sh failed"
+  fi
+fi
+
 # ── pre-pass hook (replaces the old hardcoded worktree prune) ──
 # If the repo config defines hooks.pre_pass, run it under the held lock, cwd = work
 # tree, before invoking claude (e.g. refresh a board snapshot, prune stale worktrees).
