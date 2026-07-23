@@ -18,6 +18,7 @@ The entire system is this folder:
 | `telegram.py` | The Telegram bridge — Python stdlib only. `send` / `send-photo` / `send-document` / `poll` / `discover` subcommands wrapping `sendMessage`, `sendPhoto`, `sendDocument`, and long-polled `getUpdates`. Inbound photos are downloaded locally so the agent can look at bug screenshots. |
 | `loop-lock.sh` | A shared singleton lock so a scheduled pass and an interactive `/loop` session never run at once (no double-drained Telegram offset, no double-builds). |
 | `cron-run.sh` / `run-pass.sh` / `install-cron.sh` | Optional always-on: one headless pass under the lock. `cron-run.sh` is the config-driven runner (laptop launchd or container); `run-pass.sh` is the in-container entrypoint; `install-cron.sh` is the macOS launchd installer (adapt for Linux cron/systemd). |
+| `sweep-worktrees.sh` | The agent-tier worktree/branch prune policy `cron-run.sh` runs each pass — reclaims the loop's dead build worktrees + merged `agent/*` branches so the box doesn't leak disk. Standalone-callable; the headless twin of the laptop `/worktree --gc`. |
 | `docker/` | The containerized deployment — `Dockerfile`, `loop-mcp.json`, systemd unit templates, and a runbook (`docker/README.md`). |
 | `env.example` | The two env vars the bridge needs, plus the optional runner env. |
 
@@ -68,6 +69,15 @@ the loop runs headless on a schedule even when no session is open:
   `--dangerously-skip-permissions` (there's no human to approve tool calls when
   unattended); it's bounded by the SKILL's own guardrails and worktree-isolated
   build subagents. Understand that trade-off before enabling it.
+- `sweep-worktrees.sh` — the agent-tier prune policy, run automatically by
+  `cron-run.sh` each pass (right after the sitting-tree reset, before any
+  `hooks.pre_pass`). It reclaims the loop's own dead build worktrees under
+  `.claude/worktrees/` and its merged `agent/*` / `worktree-agent-*` local
+  branches (ancestry check, with a `gh` squash-merge fallback for `agent/*`) — the
+  headless twin of the laptop `/worktree --gc`, so the box doesn't leak disk. It
+  touches only loop-owned worktrees/branches, never a human's or the base/prod
+  branch; `TICKET_LOOP_NO_SWEEP=1` disables it. Also callable by hand:
+  `sweep-worktrees.sh <repo-dir>`.
 - `install-cron.sh` — `TICKET_LOOP_WORKTREE=/path/to/worktree install-cron.sh`
   loads a LaunchAgent that runs a pass every 30 min, 09:00–20:00 local; the daily
   digest rides the first pass of each day. `--refresh` pulls the worktree up to
@@ -215,6 +225,7 @@ and decommission ONLY that project's individual timer.
 | `feature: …` / `ticket: …` | Same — created, labeled `agent`, then scoped/planned before any build |
 | `question: <about the code>` | A read-only subagent reads the code and replies — **no ticket, no board side effect** (distinct from the bare `open questions` command) |
 | `take ABC-123` | Green-light an *existing* backlog ticket into the queue |
+| `release` / `release <repo>` | Cuts the base→prod **release PR** for the repo (absorb hotfixes, version bump + changelog + tag, PR titled `Release v<X.Y.Z> [agent]`) and **STOPS — merging it deploys**. Refuses with 🛑 if the repo isn't release-configured. Bare `release` targets the sitting repo |
 | `go` (reply to a 🙋 scout proposal) | Approves a ticket the loop proposed when the queue ran empty |
 | Reply to a ❓ question, or `ABC-123 <answer>` | Answer recorded on the ticket; it unblocks |
 | A screenshot (with optional caption) | Downloaded locally; the agent reads it as evidence and attaches the context to the ticket |
@@ -223,11 +234,19 @@ and decommission ONLY that project's individual timer.
 The agent posts back: ❓ clarifying questions, 🔨 when it starts a build,
 ✅ with the PR link (and ✅ again when the PR merges and the ticket closes),
 🔁 when it has addressed review feedback and updated a PR, ⚠️ on failures,
-🔀 when it heals a conflicted PR, 🙋 proposals when the queue runs empty (it
-scouts your backlog for agent-suitable tickets at most once a day rather than
-pinging every pass — still approval-gated), and one morning digest: merged /
-awaiting review / blocked on answers / queued (`--report` triggers it on demand,
-e.g. from cron).
+🔀 when it heals a conflicted PR, 🚀 when a `release` opens the base→prod PR
+(and 🎉 when that PR merges and the release goes live), 🙋 proposals when the
+queue runs empty (it scouts your backlog for agent-suitable tickets at most once
+a day rather than pinging every pass — still approval-gated), and one morning
+digest: merged / awaiting review / pending release / blocked on answers / queued
+(`--report` triggers it on demand, e.g. from cron).
+
+For **instant** release announcements (rather than waiting for the next babysit
+pass), a human can copy `dev-process/templates/release-announce.yml` into the
+repo's `.github/workflows/` and set the two Telegram secrets — it fires the
+`🎉 <repo> v<X.Y.Z> live` message the moment the release PR merges and drops the
+same `📣 announced` marker the loop uses, so the two never double-announce. The
+agent never installs it itself (`.github/workflows/**` is off-limits to the loop).
 
 ## Safety model (the part that matters)
 

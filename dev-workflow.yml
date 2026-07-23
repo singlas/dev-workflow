@@ -27,3 +27,19 @@ tracker:
 quality:
   test: "python3 dev-workflow/test_validate.py && python3 dev-workflow/test_queue_count.py && python3 dev-workflow/test_dw_config.py && python3 skills/ticket-loop/orchestrator/test_orch.py && python3 skills/ticket-loop/test_telegram.py && bash skills/ticket-loop/orchestrator/test_orchestrator_smoke.sh"
   lint: "python3 -m py_compile dev-workflow/*.py skills/ticket-loop/*.py skills/ticket-loop/orchestrator/*.py"
+
+# Versioning + changelog for /release. The version string's declared spots live
+# in .version-bump.json (rewritten by scripts/bump-version.sh); plugin.json is
+# the canonical one the release commit stages.
+version:
+  file: .claude-plugin/plugin.json
+  scheme: conservative-patch      # feature batches bump the patch segment (v0.6.3 → v0.6.4)
+  changelog: "scripts/changelog.sh"
+
+# Merging the dev→main release PR IS the release (deploy.trigger). Nothing
+# auto-deploys from it: plugin consumers pick it up via /plugin update, and the
+# orchestrator box is rolled MANUALLY afterwards with scripts/deploy-nt.sh
+# (rebuild image + recreate container; --with-env for the guarded env push).
+deploy:
+  trigger: merge-main
+  announce: telegram
