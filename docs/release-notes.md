@@ -1,5 +1,34 @@
 # Release notes
 
+## v0.6.4
+
+**The agent tier finally cleans up after itself.** Every pass now runs
+`sweep-worktrees.sh` right after the sitting-tree reset: loop-owned worktrees
+under `.claude/worktrees/` (branch `agent/*` / `worktree-agent-*`) are removed,
+and merged loop-owned local branches are deleted — by ancestry, plus a
+`gh`-backed squash-merge check for `agent/*` branches that degrades to
+ancestry-only offline. Non-loop worktrees and unmerged branches are never
+touched; `TICKET_LOOP_NO_SWEEP=1` skips it. In parent mode the sweep also covers
+each `.dw-agent-clone`-marked child clone. This closes the disk leak that filled
+the orchestrator box (~2.5 GB of dead checkouts and dozens of stale branches).
+
+**Cut a release from Telegram.** A new `release` / `release <repo>` message class
+in both loops: the loop verifies the repo is release-configured (prod branch,
+deploy trigger, version file/scheme/changelog), then a foreground subagent runs
+the full /release contract in the canonical clone — preflight, hotfix absorb,
+version bump + tag, and a `Release vX.Y.Z [agent]` dev→prod PR. It stops there:
+merging stays the human's click. Babysit watches release PRs (red CI ⚠️, merged →
+`🎉 live` + a `📣 announced` marker comment for dedup), the digest lists pending
+ones, and a retry after a partial failure resumes from the pushed bump instead of
+double-bumping. An optional human-installed GitHub Actions template
+(`dev-process/templates/release-announce.yml`) announces instantly on merge using
+the same marker, so the loop's poll-based fallback never double-sends.
+
+**Release plumbing for this repo itself:** `scripts/changelog.sh` (commit-grouped
+changelog view), `scripts/deploy-nt.sh` (manual box rollout: image rebuild +
+recreate, with an opt-in confirm-gated env push that diffs key names, never
+values), and the `version:`/`deploy:` blocks in `dev-workflow.yml`.
+
 ## v0.6.3
 
 **Ask the codebase over Telegram — `question:`.** A new inbound message class in
