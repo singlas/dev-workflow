@@ -56,12 +56,16 @@ for envfile in "${ENVS[@]}"; do
   if [ "$PIN" = 1 ]; then
     pin_out="$(
       set -a; . "$path"; set +a
+      # Drop every existing pin first so only the fresh how-to stays pinned,
+      # then pin the new message. Both need the bot to be a group admin.
+      curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/unpinAllChatMessages" \
+        -d "chat_id=${AGENT_TELEGRAM_CHAT_ID}" >/dev/null 2>&1
       curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/pinChatMessage" \
         -d "chat_id=${AGENT_TELEGRAM_CHAT_ID}" -d "message_id=${msg_id}" \
         -d "disable_notification=true" 2>&1
     )"
     case "$pin_out" in
-      *'"ok":true'*) echo "     pinned" ;;
+      *'"ok":true'*) echo "     pinned (old pins cleared)" ;;
       *) echo "     pin failed (bot not admin? pin it by hand): $(printf '%s' "$pin_out" | head -c 120)" ;;
     esac
   fi
