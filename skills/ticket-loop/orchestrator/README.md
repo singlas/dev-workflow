@@ -112,7 +112,7 @@ so you never hand-type a clone URL.
 > the orchestrator refuses to start (niptao + rasa go down too).
 
 Config via env (defaults match nt): `HOST` (default `nt`), `CLAUDE_PIN`
-(default `2.1.207`, also the image tag), `IMAGE`, `VOLUME`, `CONTAINER`,
+(default `2.1.220`, also the image tag), `IMAGE`, `VOLUME`, `CONTAINER`,
 `REMOTE_DIR`, `BRANCH`. Docs-only changes (README, specs) need no verb — `deploy`
 pulls them incidentally; a bare `git pull` on the box is enough on its own. The
 script is the executable source of truth for the §10 `docker run` flags.
@@ -151,7 +151,7 @@ errors without an explicit pin so version drift is always a conscious act).
 Tag the image with the pin so `docker images` self-documents what's deployed:
 
     git clone https://github.com/singlas/dev-workflow.git ~/dev-workflow && cd ~/dev-workflow
-    CLAUDE_PIN=2.1.207 IMAGE=dw-agent:2.1.207 VOLUME=dw-agent \
+    CLAUDE_PIN=2.1.220 IMAGE=dw-agent:2.1.220 VOLUME=dw-agent \
       skills/ticket-loop/docker/local-run.sh build
 
 `IMAGE` and `VOLUME` are arbitrary names read by every `local-run.sh`

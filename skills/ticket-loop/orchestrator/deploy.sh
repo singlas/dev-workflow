@@ -28,7 +28,7 @@
 #
 # Config via env (defaults match the nt deployment):
 #   HOST         ssh target                 (default: nt)
-#   CLAUDE_PIN   claude version to bake     (default: 2.1.207) — also the tag
+#   CLAUDE_PIN   claude version to bake     (default: 2.1.220) — also the tag
 #   IMAGE        image tag                  (default: dw-agent:$CLAUDE_PIN)
 #   VOLUME       docker volume              (default: dw-agent)
 #   CONTAINER    container name             (default: dw-orchestrator)
@@ -37,7 +37,7 @@
 set -euo pipefail
 
 HOST="${HOST:-nt}"
-CLAUDE_PIN="${CLAUDE_PIN:-2.1.207}"
+CLAUDE_PIN="${CLAUDE_PIN:-2.1.220}"
 IMAGE="${IMAGE:-dw-agent:$CLAUDE_PIN}"
 VOLUME="${VOLUME:-dw-agent}"
 CONTAINER="${CONTAINER:-dw-orchestrator}"
