@@ -567,13 +567,16 @@ def apply_outcome(ps, cls, cfg, now, cadence="adaptive", interval_s=None):
 
 
 def _latest_usage_limit(state_dir):
-    """(limit_hit, reset_str) from the LAST record in <state_dir>/usage.jsonl.
-    Tells a shared session-LIMIT exhaustion apart from an auth failure: a
-    limit-hit pass records limit=true (usage-parse detects the limit text); an
-    expired-token auth failure produces no usage envelope, so limit stays false.
-    Returns (False, '') on any missing / unreadable / limitless file."""
+    """(limit_hit, kind, reset_str) from the LAST record in
+    <state_dir>/usage.jsonl. Tells a shared LIMIT exhaustion apart from an auth
+    failure: a limit-hit pass records limit=true (usage-parse detects the limit
+    text); an expired-token auth failure produces no usage envelope, so limit
+    stays false. kind is 'session' (resets on its own in hours) or 'spend' (the
+    org monthly spend cap — an admin must raise it); records written before the
+    kind field existed default to 'session'.
+    Returns (False, '', '') on any missing / unreadable / limitless file."""
     if not state_dir:
-        return False, ""
+        return False, "", ""
     try:
         path = Path(state_dir) / "usage.jsonl"
         last = ""
@@ -584,10 +587,21 @@ def _latest_usage_limit(state_dir):
         if last:
             rec = json.loads(last)
             if isinstance(rec, dict) and rec.get("limit"):
-                return True, str(rec.get("reset") or "")
+                return (True, str(rec.get("kind") or "session"),
+                        str(rec.get("reset") or ""))
     except (OSError, ValueError, TypeError):
         pass
-    return False, ""
+    return False, "", ""
+
+
+def _limit_cause(kind, reset):
+    """Human tail for an alert whose failing pass hit a usage limit."""
+    if kind == "spend":
+        return ("Claude MONTHLY SPEND limit hit — an admin must raise it at "
+                "claude.ai/settings/usage (or wait for the billing-cycle "
+                "reset); passes auto-resume after")
+    tail = f" — {reset}" if reset else ""
+    return f"Claude session limit hit (auto-resumes on reset){tail}"
 
 
 def cmd_record(args):
@@ -606,6 +620,16 @@ def cmd_record(args):
     _delay, esc = apply_outcome(ps, args.outcome, roster["cfg"], now,
                                 cadence=proj["cadence"],
                                 interval_s=proj["interval_s"])
+    # A failed pass that hit a usage limit has a KNOWN cause — name it in the
+    # streak alert instead of the generic "check the loop log" (the latest
+    # usage.jsonl record is this pass's: cron-run.sh appends it pre-record).
+    if args.outcome in ("error", "crash") and esc:
+        hit, kind, reset = _latest_usage_limit(proj.get("state_dir"))
+        if hit:
+            cause = _limit_cause(kind, reset)
+            esc = [(lvl, m.replace("check the loop log", cause)
+                    if "consecutive failed passes" in m else m)
+                   for lvl, m in esc]
     st.pop("pass_started", None)                       # write-ahead consumed
     st["rr_next"] = (names.index(args.project) + 1) % len(names)
     # Shared-failure heuristic (supervision §2): one ~/.claude for all projects,
@@ -621,13 +645,20 @@ def cmd_record(args):
         # Discriminate on the authoritative signal: a limit-hit leaves limit=true
         # in the tenant's latest usage.jsonl; auth failure writes no usage.
         sd_by_name = {p["name"]: p.get("state_dir") for p in roster["projects"]}
-        reset_hint, limit_seen = "", False
+        reset_hint, limit_seen, spend_seen = "", False, False
         for n in names:
-            hit, reset = _latest_usage_limit(sd_by_name.get(n))
+            hit, kind, reset = _latest_usage_limit(sd_by_name.get(n))
             if hit:
                 limit_seen = True
+                spend_seen = spend_seen or kind == "spend"
                 reset_hint = reset_hint or reset
-        if limit_seen:
+        if spend_seen:
+            esc.append(("ops", "🛑 EVERY roster project is erroring — shared Claude "
+                               "org MONTHLY SPEND LIMIT hit, NOT an auth problem; "
+                               "an admin must raise it at claude.ai/settings/usage "
+                               "(or wait for the billing-cycle reset); passes "
+                               "auto-resume once lifted."))
+        elif limit_seen:
             tail = f" — {reset_hint}" if reset_hint else ""
             esc.append(("ops", "🚦 EVERY roster project is erroring — shared Claude "
                                "SESSION LIMIT hit (credits exhausted), NOT an auth "

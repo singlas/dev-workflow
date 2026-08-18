@@ -279,9 +279,10 @@ else
   log "WARN: usage-parse.py or python3 missing — usage not recorded"
 fi
 
-LIMIT=0; RESET=""
+LIMIT=0; RESET=""; LKIND=""
 case "$PARSE_LINE" in *limit=1*) LIMIT=1 ;; esac
 RESET="$(printf '%s' "$PARSE_LINE" | sed -n 's/.*reset=\([^	]*\).*/\1/p')"
+LKIND="$(printf '%s' "$PARSE_LINE" | sed -n 's/.*kind=\([^	]*\).*/\1/p')"
 
 # Regression guard (reads the RAW capture, not the log): a headless -p pass must
 # run its build subagents in the FOREGROUND (see the ticket-loop SKILL). If the
@@ -314,7 +315,12 @@ notify_ops() {  # $1 message
 ALERT_STATE="$STATE_DIR/alert.json"
 if [ "$DRYRUN" = 0 ] && [ -z "${DW_ORCHESTRATED:-}" ]; then
   KIND="" FINGERPRINT="" MSG=""
-  if [ "$LIMIT" = 1 ]; then
+  if [ "$LIMIT" = 1 ] && [ "$LKIND" = "spend" ]; then
+    # Spend limit ≠ session limit: it does NOT reset in hours — an admin must
+    # raise it (or the billing cycle must turn) before passes resume.
+    KIND="limit"; FINGERPRINT="limit:spend"
+    MSG="🛑 ${TENANT}: Claude MONTHLY SPEND limit hit — passes blocked until an admin raises it at claude.ai/settings/usage (or the billing cycle resets); they auto-resume after"
+  elif [ "$LIMIT" = 1 ]; then
     KIND="limit"; FINGERPRINT="limit:${RESET:-?}"
     MSG="⚠️ ${TENANT}: Claude session limit — passes paused${RESET:+, ${RESET}}"
   elif [ "$rc" -ne 0 ] && [ ! -f "$STATE_DIR/outcome.json" ]; then

@@ -682,11 +682,13 @@ class TestSharedAuthEscalation(unittest.TestCase):
             st, out = self.record(roster, state, "beta", "productive")
             self.assertFalse(st["all_error_alerted"])
 
-    def _write_usage_limit(self, tmp, name, limit, reset=""):
+    def _write_usage_limit(self, tmp, name, limit, reset="", kind=""):
         sd = Path(tmp) / f"state-{name}"
         sd.mkdir(parents=True, exist_ok=True)
         rec = {"ts": "2026-07-11T12:00:00", "tenant": name, "rc": 1,
                "limit": limit}
+        if kind:
+            rec["kind"] = kind
         if reset:
             rec["reset"] = reset
         (sd / "usage.jsonl").write_text(json.dumps(rec) + "\n")
@@ -706,6 +708,47 @@ class TestSharedAuthEscalation(unittest.TestCase):
             self.assertIn("resets 2pm", out["ESCALATE_OPS"])
             self.assertNotIn("expired CLAUDE_CODE_OAUTH_TOKEN",
                              out["ESCALATE_OPS"])
+
+    def test_all_error_says_spend_limit_when_kind_is_spend(self):
+        """The org monthly SPEND cap is a distinct incident: it does not reset
+        in hours — the alert must say who fixes it (an admin) and where."""
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = self.make_two_project_roster(tmp)
+            state = Path(tmp) / "orch-state.json"
+            self._write_usage_limit(tmp, "alpha", True, kind="spend")
+            self._write_usage_limit(tmp, "beta", True, kind="spend")
+            self.record(roster, state, "alpha", "error")
+            _st, out = self.record(roster, state, "beta", "error")
+            self.assertIn("SPEND LIMIT", out["ESCALATE_OPS"])
+            self.assertIn("claude.ai/settings/usage", out["ESCALATE_OPS"])
+            self.assertNotIn("SESSION LIMIT", out["ESCALATE_OPS"])
+            self.assertNotIn("expired CLAUDE_CODE_OAUTH_TOKEN",
+                             out["ESCALATE_OPS"])
+
+    def test_streak_alert_names_the_limit_cause(self):
+        """The 3-consecutive-failures alert must name a KNOWN cause (the usage
+        limit) instead of the generic 'check the loop log'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = self.make_two_project_roster(tmp)
+            state = Path(tmp) / "orch-state.json"
+            self._write_usage_limit(tmp, "alpha", True, kind="spend")
+            self.record(roster, state, "alpha", "error")
+            self.record(roster, state, "alpha", "error")
+            _st, out = self.record(roster, state, "alpha", "error")
+            self.assertIn("3 consecutive failed passes", out["ESCALATE_PROJECT"])
+            self.assertIn("SPEND limit", out["ESCALATE_PROJECT"])
+            self.assertIn("claude.ai/settings/usage", out["ESCALATE_PROJECT"])
+            self.assertNotIn("check the loop log", out["ESCALATE_PROJECT"])
+
+    def test_streak_alert_stays_generic_without_a_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = self.make_two_project_roster(tmp)
+            state = Path(tmp) / "orch-state.json"
+            self.record(roster, state, "alpha", "error")
+            self.record(roster, state, "alpha", "error")
+            _st, out = self.record(roster, state, "alpha", "error")
+            self.assertIn("3 consecutive failed passes", out["ESCALATE_PROJECT"])
+            self.assertIn("check the loop log", out["ESCALATE_PROJECT"])
 
     def test_all_error_says_auth_when_no_usage_limit(self):
         """No limit=true in any usage.jsonl -> a genuine auth failure wording."""
