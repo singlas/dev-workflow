@@ -87,6 +87,12 @@ env_sync() {
   fi
 }
 
-[ "$DO_IMAGE" = 1 ] && HOST="$HOST" BRANCH="$BRANCH" VOLUME="$VOLUME" CONTAINER="$CONTAINER" "$ORCH_DEPLOY" deploy
+# Releases merge on GitHub, so the local $BRANCH ref lags behind origin after
+# every release — fast-forward it first or deploy.sh's push step rejects.
+if [ "$DO_IMAGE" = 1 ]; then
+  git -C "$ROOT" fetch origin "$BRANCH:$BRANCH" 2>/dev/null \
+    || echo "note: could not fast-forward local $BRANCH (checked out or diverged) — deploy.sh push may fail"
+  HOST="$HOST" BRANCH="$BRANCH" VOLUME="$VOLUME" CONTAINER="$CONTAINER" "$ORCH_DEPLOY" deploy
+fi
 [ "$DO_ENV" = 1 ] && env_sync
 echo "done."

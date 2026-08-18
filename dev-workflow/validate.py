@@ -177,8 +177,15 @@ def check(data):
 
     # build.cap_per_pass ceiling (tighten-only).
     build = data.get("build")
-    if isinstance(build, dict) and "cap_per_pass" in build:
-        _check_ceiling(errors, "build", "cap_per_pass", build["cap_per_pass"])
+    if isinstance(build, dict):
+        if "cap_per_pass" in build:
+            _check_ceiling(errors, "build", "cap_per_pass", build["cap_per_pass"])
+        # model fields, when present, must be non-empty strings (any model id or
+        # alias — the runner passes them through to `claude --model` / the Task
+        # tool verbatim).
+        for field in ("model", "subagent_model"):
+            if field in build and not _nonempty_str(build[field]):
+                errors.append("build.%s must be a non-empty string" % field)
 
     # blog (optional) — enables cleanup's blog-proposal step. Its skill/posts_dir/
     # publish values, when present, must be non-empty strings. Omitting `publish`

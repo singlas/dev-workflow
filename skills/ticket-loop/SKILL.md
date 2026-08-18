@@ -38,7 +38,7 @@ else DW="uv run dev-workflow/dw-config.py"; fi                                  
 [ -f dev-workflow.yml ] \
   && $DW dev-workflow.yml --batch tracker.team tracker.project= tracker.roles.queue.label tracker.roles.queue.states \
        tracker.roles.blocked.label tracker.roles.exclude.labels tracker.roles.done.state \
-       repo.base_branch repo.prod_branch quality.test quality.lint build.model build.cap_per_pass \
+       repo.base_branch repo.prod_branch quality.test quality.lint build.model build.subagent_model= build.cap_per_pass \
        guardrails.diff_budget.max_lines guardrails.diff_budget.max_files \
   || echo "no dev-workflow.yml — cannot run a pass; tell the user to run /setup"
 ```
@@ -64,6 +64,14 @@ else DW="uv run dev-workflow/dw-config.py"; fi                                  
   (`max_lines` / `max_files`). These may be *lower* than the framework ceilings but
   **never higher** — the ceilings (≤ 2 builds/pass, ≤ 400 lines, ≤ 15 files) bind
   regardless of what the config says.
+- **Subagent model** — every implementation subagent (build step 5, revise 2b,
+  heal 2c) is dispatched with the Task tool `model` parameter resolved as:
+  the ticket's `model:<tier>` label if present (allowed tiers ONLY: `model:opus`,
+  `model:sonnet`, `model:haiku` — any other value is ignored, note it in the
+  ticket comment), else `build.subagent_model` from config, else omit the
+  parameter (the subagent inherits the pass model). For a revise/heal, the
+  ticket is the one the PR links to. Read-only subagents (`question:` answers,
+  triage reads) are not builds — they always inherit the pass model.
 
 **Tracker access is through the canonical verbs** (`list_actionable`, `get_ticket`,
 `create_ticket`, `comment`, `move`, `label`/`unlabel`, `link_pr`) documented in
@@ -463,7 +471,8 @@ when there are review comments newer than the branch's last commit, a
 `CHANGES_REQUESTED` decision, or a failing check:
 
 - Spawn a subagent (general-purpose, isolated worktree, **`run_in_background: false`
-  — await it**) with: the PR number and branch, every unaddressed review comment
+  — await it**, `model` per the **Subagent model** rule) with: the PR number and
+  branch, every unaddressed review comment
   verbatim (file + line + text), the failing check output if any, and the
   **Security guardrails**. Instruct it to: check out the branch, merge
   `origin/<base_branch>` if behind (never rebase), address each comment / fix the
@@ -485,7 +494,8 @@ when there are review comments newer than the branch's last commit, a
 `gh pr list --base <base_branch> --state open --json number,title,headRefName,mergeable`:
 
 - Spawn a subagent (general-purpose, isolated worktree, **`run_in_background: false`
-  — await it**) to heal it: fetch, check out the PR's head branch, **merge
+  — await it**, `model` per the **Subagent model** rule) to heal it: fetch, check
+  out the PR's head branch, **merge
   `origin/<base_branch>` into the branch** — never rebase, a rebase needs a
   force-push which is off-limits — resolving conflicts in favour of keeping both
   intents (what the ticket built + what landed on the base branch since). Re-run
@@ -596,9 +606,10 @@ messages (priorities, "stack these onto one PR") are normal input — apply them
   `telegram.py send "🔨 Starting ABC-<n> — <one-line plan>"`.
 - Spawn **one** subagent (general-purpose, isolated worktree, **`run_in_background:
   false` — await it fully; never background it, never start a second build in
-  parallel**) with: the issue id, title, full body, the relevant Q&A comments, your
-  triage notes (root-cause / plan + assumptions), and the **Security guardrails**
-  section above, verbatim. Instruct it to:
+  parallel**, `model` per the **Subagent model** rule in Configuration) with: the
+  issue id, title, full body, the relevant Q&A comments, your triage notes
+  (root-cause / plan + assumptions), and the **Security guardrails** section
+  above, verbatim. Instruct it to:
   1. Create/use branch `agent/abc-<n>` based on current `origin/<base_branch>`.
   2. Confirm the root-cause / approach in the code first, then re-judge confidence
      from inside the code. Clear, low-risk, within the diff-sanity budget →

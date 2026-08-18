@@ -102,8 +102,18 @@ guardrails:
     max_files: 15
 
 # Build settings for each autonomous pass. cap_per_pass is tighten-only (<= 2).
+#
+# Model selection is two-tier: `model` pins the headless pass itself (triage,
+# planning, PR-babysitting judgment — the thinking); `subagent_model` is what
+# the implementation subagents run on (build / revise / heal — the bulk of the
+# token burn). Omit `subagent_model` to inherit the pass model. A ticket can
+# override the subagent tier for itself with a `model:<tier>` label —
+# model:opus | model:sonnet | model:haiku; any other value is ignored.
+# Cost-effective shape: model: opus + subagent_model: sonnet (plan smart,
+# build cheap); flip to model: sonnet everywhere for the leanest burn.
 build:
   model: sonnet                  # model id the loop pins each headless pass to
+  subagent_model: sonnet         # implementation subagents; omit = inherit `model`
   cap_per_pass: 2                # max tickets built per loop pass
 
 # v2 opt-in: the LOCAL autonomous agent tier (the `ticket-loop` skill + its

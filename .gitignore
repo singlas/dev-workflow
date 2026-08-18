@@ -5,3 +5,4 @@ __pycache__/
 # install-cron.sh picks up .local/agent.env as the default --env-file.
 .local/
 .context/
+.env

@@ -19,9 +19,9 @@ Writes:
   RESULTFILE   the human summary (`.result`, else raw stdout) for the cron log
   usage.jsonl  one appended record:
     {ts, tenant, input_tokens, output_tokens, cache_read, cache_creation,
-     num_turns, duration_ms, total_cost_usd, rc, limit, reset}
+     num_turns, duration_ms, total_cost_usd, rc, limit, kind, reset}
 Prints ONE tab-separated control line for the shell:
-  limit=<0|1>\treset=<str>\tparsed=<0|1>
+  limit=<0|1>\treset=<str>\tparsed=<0|1>\tkind=<session|spend|->
 """
 
 import argparse
@@ -41,6 +41,11 @@ LIMIT_RE = re.compile(
     r"|limit resets"
     r")"
 )
+# A SPEND limit is a different incident class: it does not reset in hours (an
+# admin must raise it at claude.ai/settings/usage, or the billing cycle turns).
+# Real 2026-08 wording: "You've hit your org's monthly spend limit · ask your
+# admin to raise it at claude.ai/settings/usage".
+SPEND_RE = re.compile(r"(?i)(?:monthly\s+)?spend(?:ing)?\s+limit")
 # Pull a human-readable reset hint: text right after "reset(s)" up to a sentence
 # boundary — e.g. "resets 2pm (Asia/Kolkata)".
 RESET_RE = re.compile(r"(?i)resets?\b[^\n.]{0,60}")
@@ -82,16 +87,22 @@ def parse_result(stdout_text):
 
 
 def detect_limit(raw_text):
-    """(hit: bool, reset_hint: str) from the RAW combined stdout+stderr."""
+    """(hit: bool, kind: 'session'|'spend'|'', reset_hint: str) from the RAW
+    combined stdout+stderr. Spend is checked first: its message also contains
+    the word "limit", and the two need different operator responses."""
+    if SPEND_RE.search(raw_text):
+        return True, "spend", ""
     if not LIMIT_RE.search(raw_text):
-        return False, ""
+        return False, "", ""
     m = RESET_RE.search(raw_text)
     reset = m.group(0).strip() if m else ""
-    return True, reset
+    return True, "session", reset
 
 
-def build_record(tenant, rc, usage, limit, reset, now_iso):
+def build_record(tenant, rc, usage, limit, reset, now_iso, kind=""):
     rec = {"ts": now_iso, "tenant": tenant, "rc": rc, "limit": limit}
+    if limit and kind:
+        rec["kind"] = kind
     if reset:
         rec["reset"] = reset
     for k in ("input_tokens", "output_tokens", "cache_read", "cache_creation",
@@ -121,13 +132,14 @@ def main(argv=None):
     out_text = _read(args.stdout)
     err_text = _read(args.stderr)
     result, usage = parse_result(out_text)
-    limit, reset = detect_limit(out_text + "\n" + err_text)
+    limit, kind, reset = detect_limit(out_text + "\n" + err_text)
 
     with open(args.result_out, "w", encoding="utf-8") as fh:
         fh.write(result if result else out_text)
 
     now_iso = args.now or datetime.datetime.now().isoformat(timespec="seconds")
-    rec = build_record(args.tenant, args.rc, usage, limit, reset, now_iso)
+    rec = build_record(args.tenant, args.rc, usage, limit, reset, now_iso,
+                       kind=kind)
     try:
         with open(args.usage_out, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec) + "\n")
@@ -135,7 +147,9 @@ def main(argv=None):
         print(f"warning: could not append usage record: {exc}", file=sys.stderr)
 
     parsed = 1 if usage else 0
-    print(f"limit={1 if limit else 0}\treset={reset}\tparsed={parsed}")
+    # kind= is LAST so older cron-run.sh field parsing keeps working unchanged.
+    print(f"limit={1 if limit else 0}\treset={reset}\tparsed={parsed}"
+          f"\tkind={kind or '-'}")
     return 0
 
 

@@ -54,6 +54,18 @@ class ValidateTests(unittest.TestCase):
         errors = _errors_for(cfg)
         self.assertTrue(any("cap_per_pass" in e for e in errors), errors)
 
+    def test_build_model_fields_accept_strings(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["build"] = {"model": "opus", "subagent_model": "sonnet"}
+        self.assertEqual(_errors_for(cfg), [])
+
+    def test_build_model_fields_reject_non_strings(self):
+        cfg = copy.deepcopy(MINIMAL)
+        cfg["build"] = {"model": "", "subagent_model": 5}
+        errors = _errors_for(cfg)
+        self.assertTrue(any("build.model" in e for e in errors), errors)
+        self.assertTrue(any("build.subagent_model" in e for e in errors), errors)
+
     def test_max_lines_over_ceiling_fails(self):
         cfg = copy.deepcopy(MINIMAL)
         cfg["guardrails"] = {"diff_budget": {"max_lines": 900}}

@@ -53,24 +53,43 @@ class ParseResult(unittest.TestCase):
 class DetectLimit(unittest.TestCase):
     def test_real_outage_wording(self):
         # The exact 2.1.210 outage line.
-        hit, reset = up.detect_limit(
+        hit, kind, reset = up.detect_limit(
             "You've hit your session limit · resets 2pm (Asia/Kolkata)")
         self.assertTrue(hit)
+        self.assertEqual(kind, "session")
         self.assertIn("2pm", reset)
 
     def test_bare_session_limit(self):
-        hit, _ = up.detect_limit("Error: session limit reached, try later")
+        hit, kind, _ = up.detect_limit("Error: session limit reached, try later")
         self.assertTrue(hit)
+        self.assertEqual(kind, "session")
 
     def test_limit_resets_phrasing(self):
-        hit, reset = up.detect_limit("your limit resets at 14:00 UTC")
+        hit, kind, reset = up.detect_limit("your limit resets at 14:00 UTC")
         self.assertTrue(hit)
+        self.assertEqual(kind, "session")
         self.assertIn("14:00", reset)
 
     def test_normal_output_is_not_a_limit(self):
-        hit, reset = up.detect_limit("Pass complete. Opened PR #12. All green.")
+        hit, kind, reset = up.detect_limit("Pass complete. Opened PR #12. All green.")
         self.assertFalse(hit)
+        self.assertEqual(kind, "")
         self.assertEqual(reset, "")
+
+    def test_real_spend_limit_wording(self):
+        # The exact 2026-08-18 outage line: an org spend cap, not a session limit.
+        hit, kind, reset = up.detect_limit(
+            "You've hit your org's monthly spend limit · ask your admin to "
+            "raise it at claude.ai/settings/usage?from=cc_cli_limit_message")
+        self.assertTrue(hit)
+        self.assertEqual(kind, "spend")
+        self.assertEqual(reset, "")
+
+    def test_spend_beats_session_when_both_words_present(self):
+        hit, kind, _ = up.detect_limit(
+            "usage limit: you've hit your monthly spend limit")
+        self.assertTrue(hit)
+        self.assertEqual(kind, "spend")
 
 
 class BuildRecord(unittest.TestCase):
@@ -84,6 +103,17 @@ class BuildRecord(unittest.TestCase):
         self.assertTrue(rec["limit"])
         self.assertEqual(rec["reset"], "resets 2pm")
         self.assertEqual(rec["input_tokens"], 10)
+
+    def test_kind_recorded_only_on_limit(self):
+        usage = {"input_tokens": None, "output_tokens": None, "cache_read": None,
+                 "cache_creation": None, "num_turns": None, "duration_ms": None,
+                 "total_cost_usd": None}
+        rec = up.build_record("t", 1, usage, True, "", "2026-08-18T10:24:00",
+                              kind="spend")
+        self.assertEqual(rec["kind"], "spend")
+        rec = up.build_record("t", 0, usage, False, "", "2026-08-18T10:24:00",
+                              kind="")
+        self.assertNotIn("kind", rec)
 
 
 class Rollup(unittest.TestCase):
