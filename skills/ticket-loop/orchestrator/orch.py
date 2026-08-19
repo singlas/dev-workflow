@@ -597,9 +597,9 @@ def _latest_usage_limit(state_dir):
 def _limit_cause(kind, reset):
     """Human tail for an alert whose failing pass hit a usage limit."""
     if kind == "spend":
-        return ("Claude MONTHLY SPEND limit hit — an admin must raise it at "
-                "claude.ai/settings/usage (or wait for the billing-cycle "
-                "reset); passes auto-resume after")
+        return ("Claude MONTHLY SPEND limit hit — an admin must raise it in "
+                "the org's Claude settings → Usage (or wait for the "
+                "billing-cycle reset); passes auto-resume after")
     tail = f" — {reset}" if reset else ""
     return f"Claude session limit hit (auto-resumes on reset){tail}"
 
@@ -655,9 +655,9 @@ def cmd_record(args):
         if spend_seen:
             esc.append(("ops", "🛑 EVERY roster project is erroring — shared Claude "
                                "org MONTHLY SPEND LIMIT hit, NOT an auth problem; "
-                               "an admin must raise it at claude.ai/settings/usage "
-                               "(or wait for the billing-cycle reset); passes "
-                               "auto-resume once lifted."))
+                               "an admin must raise it in the org's Claude settings "
+                               "→ Usage (or wait for the billing-cycle reset); "
+                               "passes auto-resume once lifted."))
         elif limit_seen:
             tail = f" — {reset_hint}" if reset_hint else ""
             esc.append(("ops", "🚦 EVERY roster project is erroring — shared Claude "
