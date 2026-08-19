@@ -74,7 +74,8 @@ RUN set -eux; \
     /tmp/aws/install; \
     curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/${smparch}/session-manager-plugin.deb" \
       -o /tmp/session-manager-plugin.deb; \
-    dpkg -i /tmp/session-manager-plugin.deb; \
+    # node-slim's PATH lacks the sbin dirs dpkg's maintainer scripts need
+    PATH="/usr/local/sbin:/usr/sbin:/sbin:$PATH" dpkg -i /tmp/session-manager-plugin.deb; \
     rm -rf /tmp/awscliv2.zip /tmp/aws /tmp/session-manager-plugin.deb /var/lib/apt/lists/*; \
     aws --version; session-manager-plugin --version
 
