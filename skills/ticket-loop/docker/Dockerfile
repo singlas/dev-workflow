@@ -57,6 +57,28 @@ RUN set -eux; \
     # uv (to /usr/local/bin so it's on PATH for every user)
     curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
+# ── AWS CLI v2 + Session Manager plugin (SSM port-forward tunnels) ─────────────
+# Analytics-style repos reach non-exposed databases via
+# `aws ssm start-session` (AWS-StartPortForwardingSessionToRemoteHost), which
+# needs BOTH binaries. Arch-aware: the nt box is arm64, CI runners are amd64.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      arm64) awsarch="aarch64"; smparch="ubuntu_arm64" ;; \
+      amd64) awsarch="x86_64";  smparch="ubuntu_64bit" ;; \
+      *) echo "ERROR: unsupported arch $arch"; exit 1 ;; \
+    esac; \
+    apt-get update; apt-get install -y --no-install-recommends unzip; \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${awsarch}.zip" -o /tmp/awscliv2.zip; \
+    unzip -q /tmp/awscliv2.zip -d /tmp; \
+    /tmp/aws/install; \
+    curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/${smparch}/session-manager-plugin.deb" \
+      -o /tmp/session-manager-plugin.deb; \
+    # node-slim's PATH lacks the sbin dirs dpkg's maintainer scripts need
+    PATH="/usr/local/sbin:/usr/sbin:/sbin:$PATH" dpkg -i /tmp/session-manager-plugin.deb; \
+    rm -rf /tmp/awscliv2.zip /tmp/aws /tmp/session-manager-plugin.deb /var/lib/apt/lists/*; \
+    aws --version; session-manager-plugin --version
+
 # ── Boundary rule 2: bake the runner + plugin root-owned at /opt/dev-workflow ──
 # The mounted volume at /home/agent is the ONLY writable surface; /opt/dev-workflow
 # is owned by root and the container runs as the non-root `agent` user, so a build

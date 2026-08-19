@@ -21,6 +21,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOWTO="$ROOT/skills/ticket-loop/telegram-howto.md"
 VERSION="$(jq -r .version "$ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo unknown)"
 
+# pubx-analytics is DELIBERATELY not a default: its group ("PubX Data") carries a
+# custom data-flavored pinned how-to (2026-08-19) — broadcasting the generic text
+# there with --pin would clobber it. Update that pin by hand when the flow changes.
 DEFAULT_ENVS=(.local/niptao-agent.env .local/rasa-agent.env .local/pubx-hq-agent.env)
 
 DRY=0 PIN=0 ENVS=()

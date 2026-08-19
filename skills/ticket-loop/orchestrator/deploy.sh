@@ -175,10 +175,13 @@ push_config() {
     fi
     log "push $lfile → $vpath (mode $mode) on $HOST"
     # Contents pipe over stdin into a root helper container that writes into the
-    # volume, then chown to agent + chmod. Never echoed; the parent dir must
-    # already exist (a project's clone for its <work_tree>/.env).
+    # volume, then chown to agent + chmod. Never echoed. The parent dir is
+    # created agent-owned if missing (e.g. /home/agent/.aws) — but only under
+    # /home/agent, so a typo'd path can't scaffold outside the volume.
+    vdir="$(dirname "$vpath")"
     ssh "$HOST" "docker run --rm -i --user root -v '$VOLUME':/home/agent '$IMAGE' \
-      bash -c 'cat > \"$vpath\" && chown 10001:10001 \"$vpath\" && chmod $mode \"$vpath\"'" < "$src" \
+      bash -c 'case \"$vdir\" in /home/agent*) mkdir -p \"$vdir\" && chown 10001:10001 \"$vdir\";; esac; \
+               cat > \"$vpath\" && chown 10001:10001 \"$vpath\" && chmod $mode \"$vpath\"'" < "$src" \
       || { echo "ERROR: failed to push $lfile" >&2; exit 1; }
     pushed=$((pushed + 1))
   done < "$MANIFEST"
