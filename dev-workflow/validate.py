@@ -33,7 +33,7 @@ except ImportError:
 
 ALLOWED_TOP = {"repo", "tracker", "chat", "quality", "version", "deploy",
                "board", "guardrails", "build", "schedule", "hooks", "runtime",
-               "blog", "agent", "repos"}
+               "blog", "agent", "repos", "notify"}
 REQUIRED = {"repo": ["base_branch", "prod_branch"], "tracker": ["provider", "team", "ticket_prefix"]}
 BASELINE_OFF_LIMITS = [".env*", "*.key", "*.pem", "credentials.json",
                        ".claude/settings*", ".github/workflows/**"]

@@ -720,7 +720,10 @@ class TestSharedAuthEscalation(unittest.TestCase):
             self.record(roster, state, "alpha", "error")
             _st, out = self.record(roster, state, "beta", "error")
             self.assertIn("SPEND LIMIT", out["ESCALATE_OPS"])
-            self.assertIn("claude.ai/settings/usage", out["ESCALATE_OPS"])
+            # No raw URL in the alert (Telegram auto-links them) — point at the
+            # settings page in words instead.
+            self.assertIn("Claude settings", out["ESCALATE_OPS"])
+            self.assertNotIn("claude.ai/", out["ESCALATE_OPS"])
             self.assertNotIn("SESSION LIMIT", out["ESCALATE_OPS"])
             self.assertNotIn("expired CLAUDE_CODE_OAUTH_TOKEN",
                              out["ESCALATE_OPS"])
@@ -737,7 +740,8 @@ class TestSharedAuthEscalation(unittest.TestCase):
             _st, out = self.record(roster, state, "alpha", "error")
             self.assertIn("3 consecutive failed passes", out["ESCALATE_PROJECT"])
             self.assertIn("SPEND limit", out["ESCALATE_PROJECT"])
-            self.assertIn("claude.ai/settings/usage", out["ESCALATE_PROJECT"])
+            self.assertIn("Claude settings", out["ESCALATE_PROJECT"])
+            self.assertNotIn("claude.ai/", out["ESCALATE_PROJECT"])
             self.assertNotIn("check the loop log", out["ESCALATE_PROJECT"])
 
     def test_streak_alert_stays_generic_without_a_limit(self):

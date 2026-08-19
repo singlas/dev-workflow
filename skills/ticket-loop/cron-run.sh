@@ -232,7 +232,39 @@ if [ -n "${DW_PLUGIN_DIR:-}" ]; then
   fi
 fi
 
+# Tenant label for heartbeat/usage/alert records: the state-dir name
+# (…/state/<name>), falling back to the work-tree basename for legacy layouts.
+TENANT="$(basename "$STATE_DIR")"
+case "$TENANT" in logs|state|.agent-loop) TENANT="$(basename "$DW_WORK_TREE")" ;; esac
+
 log "=== $INVOKE $* — start (HEAD $(git rev-parse --short HEAD 2>/dev/null)${MODEL:+, model $MODEL}) ==="
+
+# ── optional start-of-pass heartbeat → the project's OWN group ──
+# notify.heartbeat: true (env TICKET_LOOP_HEARTBEAT overrides) posts a one-line
+# "pass starting" to the project group via the tenant's own TELEGRAM_BOT_TOKEN /
+# AGENT_TELEGRAM_CHAT_ID — never the ops channel. Off by default. Real passes
+# only (--report/--dry-run stay silent); a send failure never blocks the pass.
+# Under the orchestrator the pre-check already gates passes on queue depth /
+# pending messages, so a heartbeat there means "found work, starting".
+HEARTBEAT="${TICKET_LOOP_HEARTBEAT:-$(cfg notify.heartbeat false 2>/dev/null || echo false)}"
+case "$(printf '%s' "$HEARTBEAT" | tr 'A-Z' 'a-z')" in 1|true|yes|on) HEARTBEAT=1 ;; *) HEARTBEAT=0 ;; esac
+case " $* " in *" --dry-run "*|*" --report "*) HEARTBEAT=0 ;; esac
+if [ "$HEARTBEAT" = 1 ]; then
+  TGPY=""
+  for _t in "$DW_ROOT/telegram.py" "$DW_WORK_TREE/dev-workflow/telegram.py"; do
+    [ -f "$_t" ] && { TGPY="$_t"; break; }
+  done
+  if [ -n "$TGPY" ] && [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${AGENT_TELEGRAM_CHAT_ID:-}" ] \
+     && command -v python3 >/dev/null 2>&1; then
+    if python3 "$TGPY" send "▶️ ${TENANT}: pass starting (HEAD $(git rev-parse --short HEAD 2>/dev/null))" >/dev/null 2>&1; then
+      log "heartbeat sent to project group"
+    else
+      log "WARN: heartbeat failed to send"
+    fi
+  else
+    log "note: heartbeat skipped (telegram.py or group creds missing)"
+  fi
+fi
 # --output-format json → a single result object on stdout carrying the human
 # `.result` plus per-pass `usage`. Capture stdout + stderr SEPARATELY: the human
 # summary comes from the parsed `.result`, but detection (session-limit, the
@@ -253,11 +285,6 @@ rc=$?
 # usage and never page ops.
 DRYRUN=0
 case " $* " in *" --dry-run "*) DRYRUN=1 ;; esac
-
-# Tenant label for usage/alert records: the state-dir name (…/state/<name>),
-# falling back to the work-tree basename for legacy layouts.
-TENANT="$(basename "$STATE_DIR")"
-case "$TENANT" in logs|state|.agent-loop) TENANT="$(basename "$DW_WORK_TREE")" ;; esac
 
 # Parse the pass: write `.result` to the log (human summary preserved), append a
 # usage record, and learn whether this pass hit the session limit. Never fatal —
@@ -319,7 +346,7 @@ if [ "$DRYRUN" = 0 ] && [ -z "${DW_ORCHESTRATED:-}" ]; then
     # Spend limit ≠ session limit: it does NOT reset in hours — an admin must
     # raise it (or the billing cycle must turn) before passes resume.
     KIND="limit"; FINGERPRINT="limit:spend"
-    MSG="🛑 ${TENANT}: Claude MONTHLY SPEND limit hit — passes blocked until an admin raises it at claude.ai/settings/usage (or the billing cycle resets); they auto-resume after"
+    MSG="🛑 ${TENANT}: Claude MONTHLY SPEND limit hit — passes blocked until an admin raises it in the org's Claude settings → Usage (or the billing cycle resets); they auto-resume after"
   elif [ "$LIMIT" = 1 ]; then
     KIND="limit"; FINGERPRINT="limit:${RESET:-?}"
     MSG="⚠️ ${TENANT}: Claude session limit — passes paused${RESET:+, ${RESET}}"

@@ -165,3 +165,12 @@ schedule:
 # Optional: where the loop keeps its per-repo state. Defaults to .agent-loop.
 # runtime:
 #   state_dir: ".agent-loop"
+
+# Optional: extra loop notifications to the project's own chat group.
+# heartbeat: post a one-line "pass starting" to the project group at the start
+# of every real loop pass (--report/--dry-run stay silent). Off by default.
+# Under the orchestrator, passes only launch when the pre-check finds work, so
+# a heartbeat there reads as "found work, starting". Env override for a quick
+# test: TICKET_LOOP_HEARTBEAT=1.
+# notify:
+#   heartbeat: true
