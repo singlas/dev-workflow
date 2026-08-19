@@ -230,7 +230,9 @@ cmd_onboard() {
   log "push config to $HOST (roster + env files) before cloning"
   local n; n="$(push_config | tail -1)"
   log "clone any missing work trees from the roster on $HOST"
-  ssh "$HOST" "docker run --rm --user root -v '$VOLUME':/home/agent '$IMAGE' bash -s" < <(seed_missing_script)
+  # -i is LOAD-BEARING: without it docker run gives the container no stdin, so
+  # `bash -s` reads nothing and the seed silently clones NOTHING (bit us 2026-07-15).
+  ssh "$HOST" "docker run --rm -i --user root -v '$VOLUME':/home/agent '$IMAGE' bash -s" < <(seed_missing_script)
   log "restart $CONTAINER"
   ssh "$HOST" docker restart "$CONTAINER"
   ssh "$HOST" bash -s -- "$CONTAINER" < <(verify_script)
