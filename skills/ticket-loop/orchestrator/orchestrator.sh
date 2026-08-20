@@ -214,6 +214,19 @@ if [ -z "$RUN_PASS" ]; then
 fi
 log "orchestrator up — roster: ${PROJECTS:-?}"
 
+# ── event wake: telegram-wake.py long-polls each tenant's bot and touches the
+# run-now file on a message, so pickup is seconds instead of the ladder's
+# minutes. Optional (ORCH_TELEGRAM_WAKE=0 disables; absent script = skipped).
+# A daemon child: sleep_interruptible sees the run-now touch; SIGTERM drain
+# kills it with the container (no state to hand over — it never acks updates).
+WAKE_PY="$HERE/telegram-wake.py"
+WAKE_PID=""
+if [ "${ORCH_TELEGRAM_WAKE:-1}" = 1 ] && [ -f "$WAKE_PY" ]; then
+  $PY "$WAKE_PY" --roster "$ROSTER" --run-now-file "$RUN_NOW_FILE" &
+  WAKE_PID=$!
+  log "telegram-wake up (pid $WAKE_PID)"
+fi
+
 TURN=0
 while :; do
   TURN=$((TURN + 1))
