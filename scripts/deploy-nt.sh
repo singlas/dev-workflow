@@ -55,24 +55,31 @@ push_file() {  # push_file <local> <volume-path> <mode>
   local src="$1" dst="$2" mode="$3" tmp="/tmp/dw-push.$$"
   # Two separate ssh calls on purpose: piping file data AND a heredoc script in
   # one call loses the data (the heredoc claims stdin).
-  ssh "$HOST" "cat > $tmp" < "$src"
-  ssh "$HOST" "sudo install -o 10001 -g 10001 -m $mode $tmp $MOUNT${dst#/home/agent} && rm -f $tmp"
+  ssh "$HOST" "cat > $tmp" < "$src"   # stdin IS the payload here — no -n.
+  ssh -n "$HOST" "sudo install -o 10001 -g 10001 -m $mode $tmp $MOUNT${dst#/home/agent} && rm -f $tmp"
 }
 
 env_sync() {
   [ -f "$MANIFEST" ] || { echo "no $MANIFEST — nothing to push" >&2; return 1; }
-  local pushed=0 line src dst mode lsha rsha rpath
+  local pushed=0 seen=0 line src dst mode lsha rsha rpath
+  # EVERY ssh in this loop takes -n. The loop's stdin is $MANIFEST, and ssh
+  # reads stdin by default — so an un-flagged ssh swallows the rest of the
+  # manifest and the loop silently ends after the FIRST entry. That shipped:
+  # `--env-only` reported "OK orch.env — identical on box / done." and never
+  # looked at the other eight files. Same stdin-theft as the push_file comment
+  # above, one function down.
   while read -r line; do
     case "$line" in ''|'#'*) continue ;; esac
     set -- $line; src="$LOCAL_DIR/$1" dst="$2" mode="$3"
     [ -f "$src" ] || { echo "SKIP $1 — not in .local/"; continue; }
     rpath="$MOUNT${dst#/home/agent}"
     lsha="$(shasum -a 256 "$src" | cut -d' ' -f1)"
-    rsha="$(ssh "$HOST" "sudo sha256sum $rpath 2>/dev/null | cut -d' ' -f1" || true)"
+    seen=$((seen + 1))
+    rsha="$(ssh -n "$HOST" "sudo sha256sum $rpath 2>/dev/null | cut -d' ' -f1" || true)"
     if [ "$lsha" = "$rsha" ]; then echo "OK   $1 — identical on box"; continue; fi
     echo "DIFF $1 → $dst  (box copy ${rsha:+differs}${rsha:-missing})"
     # Key-name-level diff only — values never leave the files.
-    ssh "$HOST" "sudo cat $rpath 2>/dev/null" > "/tmp/dw-remote.$$" || true
+    ssh -n "$HOST" "sudo cat $rpath 2>/dev/null" > "/tmp/dw-remote.$$" || true
     comm -13 <(key_names "/tmp/dw-remote.$$") <(key_names "$src") | sed 's/^/       + local-only key: /'
     comm -23 <(key_names "/tmp/dw-remote.$$") <(key_names "$src") | sed 's/^/       - box-only key:   /'
     rm -f "/tmp/dw-remote.$$"
@@ -81,9 +88,20 @@ env_sync() {
     if [ "$ans" = "yes" ]; then push_file "$src" "$dst" "$mode"; echo "     PUSHED"; pushed=1
     else echo "     skipped"; fi
   done < "$MANIFEST"
+  # Declared = manifest lines naming a file that exists in .local/. If the walk
+  # considered fewer than that, something ate the loop's stdin again — say so
+  # loudly rather than reporting a clean "done." over a half-read manifest.
+  local declared
+  declared="$(grep -vE '^[[:space:]]*(#|$)' "$MANIFEST" | awk -v d="$LOCAL_DIR" '{ if (system("[ -f \"" d "/" $1 "\" ]") == 0) n++ } END { print n+0 }')"
+  echo "considered $seen of $declared manifest file(s) present in .local/"
+  if [ "$seen" -lt "$declared" ]; then
+    echo "ERROR: the manifest walk stopped early — $((declared - seen)) file(s) never checked." >&2
+    echo "       An ssh inside the loop without -n steals the loop's stdin. Fix before trusting this run." >&2
+    return 1
+  fi
   if [ "$pushed" = 1 ]; then
     echo "restarting $CONTAINER to load new config…"
-    ssh "$HOST" "docker restart $CONTAINER" >/dev/null
+    ssh -n "$HOST" "docker restart $CONTAINER" >/dev/null
   fi
 }
 
